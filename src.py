@@ -53,6 +53,7 @@ select from_unixtime(floor(time / 1000)) as time
      , observation_color_stripped as observation
      , world, x, y, z
 from whimc_observations
+-- timestamp has millisecond precision
 where from_unixtime(time / 1000) >= '{newer_than}'
 """
 
@@ -63,6 +64,7 @@ select from_unixtime(time / 1000) as time
      , measurement
      , world, x, y, z
 from whimc_sciencetools
+-- timestamp has millisecond precision
 where from_unixtime(time / 1000) >= '{newer_than}'
 """
 

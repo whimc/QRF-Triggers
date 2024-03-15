@@ -28,7 +28,7 @@ Create a new file `credentials.json` from `credentials.json.template`. Fill in t
 
 ## Running
 
-Every few seconds the database will be queriedd and if triggered, the QRF dispatcher will be called.
+Every 5 seconds the database will be queried and if triggered, the QRF dispatcher will be called.
 
 ```console
 $ python src.py
