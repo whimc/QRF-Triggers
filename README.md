@@ -6,9 +6,10 @@
 
 #### Mac / Linux
 ```console
-$ python3 -m venv venv
+$ python -m venv venv
 $ source venv/bin/activate
 ```
+* may be python3 depending on configuration
 
 #### Windows
 ```console
