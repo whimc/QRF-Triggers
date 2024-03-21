@@ -69,7 +69,7 @@ where from_unixtime(time / 1000) >= '{newer_than}'
 """
 
 
-def send_trigger(trigger_name, username):
+def send_trigger(trigger_name: str, username: str, priority: int):
     payload = {
         "event": "new_message",
         "data": {
@@ -79,7 +79,7 @@ def send_trigger(trigger_name, username):
             "eventID": "",
             "student": username,
             "trigger": trigger_name,
-            "priority": 1,
+            "priority": priority,
         },
     }
     # Have to populate 'masterlogs' with 'data' plus a few empty fields
@@ -123,21 +123,21 @@ class Fetcher:
         self.fetch_data()
 
         # Send all triggers
-        for trigger_name, username in self.triggers():
-            print(f"Triggered '{trigger_name}' for '{username}'")
-            send_trigger(trigger_name, username)
+        for trigger_name, username, priority in self.triggers():
+            print(f"Triggered '{trigger_name}' for '{username}' (priority {priority})")
+            send_trigger(trigger_name, username, priority)
 
         # Next iteration should /only/ show new data
         self.newer_than = now
 
-    def triggers(self) -> list[tuple[str, str]]:
+    def triggers(self) -> list[tuple[str, str, int]]:
         """
-        Return any triggers as a list of tuple[trigger name, username]
+        Return any triggers as a list of tuple[trigger name, username, priority]
         """
         triggers = []
 
         # TODO add checks here
-        # trigger = ("test", "Poi")
+        # trigger = ("test", "Poi", 1)
         # triggers.append(trigger)
 
         return triggers
