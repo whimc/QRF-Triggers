@@ -6,16 +6,15 @@
 
 #### Mac / Linux
 ```console
-$ python -m venv venv
+$ python3 -m venv venv
 $ source venv/bin/activate
 ```
-* may be python3 depending on configuration
-
 #### Windows
 ```console
-$ python3 -m venv venv
+$ python -m venv venv
 $ .\venv\Scripts\activate
 ```
+* may be python3 depending on configuration
 
 ### Install packages
 
