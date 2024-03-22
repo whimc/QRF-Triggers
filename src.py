@@ -75,7 +75,8 @@ def send_trigger(trigger_name: str, username: str, priority: int):
         "data": {
             "from": "software",
             "software": "WHIMC",
-            "timestamp": "",
+            # Expects a millisecond unix timestamp
+            "timestamp": int(datetime.now().timestamp() * 1000),
             "eventID": "",
             "student": username,
             "trigger": trigger_name,
