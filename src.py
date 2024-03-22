@@ -1,7 +1,8 @@
 import json
 import signal
 import sys
-from datetime import datetime, date, time
+from argparse import ArgumentParser, ArgumentTypeError
+from datetime import datetime
 from pathlib import Path
 from time import sleep
 
@@ -9,18 +10,12 @@ import pandas as pd
 import sqlalchemy as db
 from websockets.sync.client import connect
 
-
 with open(Path(__file__).parent / "credentials.json") as f:
     creds = json.load(f)
 ENG = db.create_engine(db.URL.create("mysql+mysqlconnector", **creds["database"]))
 
-TODAY = datetime.combine(date.today(), time.min)
-
-print("Connecting to socket... ")
-SOCKET = connect(
-    "wss://free.blr2.piesocket.com/v3/qrfchannel?api_key=4TRTtRRXmvNwXCWUFIjgKLDdZJ0zwoKpzn5ydd7Y&notify_self=1"
-)
-print("Connected!")
+# Set after parsing args
+SOCKET = None
 
 GET_ONLINE_PLAYERS = """
 select usr.user as online_user, last_time as login_time from (
@@ -95,7 +90,7 @@ def send_trigger(trigger_name: str, username: str, priority: int):
     SOCKET.recv()
 
 
-def get_data(query, newer_than: datetime = TODAY) -> pd.DataFrame:
+def get_data(query, newer_than: datetime | None = None) -> pd.DataFrame:
     return pd.read_sql(query.format(newer_than=newer_than), ENG)
 
 
@@ -106,9 +101,9 @@ class Fetcher:
         "science_tools": GET_SCIENCE_TOOLS,
     }
 
-    def __init__(self):
+    def __init__(self, initial_newer_than):
+        self.newer_than = initial_newer_than
         self.players = get_data(GET_ONLINE_PLAYERS)
-        self.newer_than = TODAY
         self.commands = pd.DataFrame()
         self.observations = pd.DataFrame()
         self.science_tools = pd.DataFrame()
@@ -121,6 +116,8 @@ class Fetcher:
 
     def on_wakeup(self):
         now = datetime.now()
+        print(f"Wakeup at {now}. Fetching data since {self.newer_than}")
+
         self.fetch_data()
 
         # Send all triggers
@@ -155,8 +152,30 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGINT, handle_sigint)
 
-    fetcher = Fetcher()
+    def _dt(inp):
+        try:
+            return datetime.strptime(inp, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            raise ArgumentTypeError(
+                f"Input did match format YYYY-MM-DD HH:MM:SS - {inp!r}"
+            )
+
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--initial-newer-than",
+        help="Surround value in quotes. Expects format 'YYYY-MM-DD HH:MM:SS'",
+        type=_dt,
+        default=datetime.now(),
+    )
+    args = parser.parse_args()
+
+    print("Connecting to socket... ")
+    SOCKET = connect(
+        "wss://free.blr2.piesocket.com/v3/qrfchannel?api_key=4TRTtRRXmvNwXCWUFIjgKLDdZJ0zwoKpzn5ydd7Y&notify_self=1"
+    )
+    print("Connected!")
+
+    fetcher = Fetcher(args.initial_newer_than)
     while True:
-        print(f"Wakeup at {datetime.now()}")
         fetcher.on_wakeup()
         sleep(5)  # run checks every 5 seconds
