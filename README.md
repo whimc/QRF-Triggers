@@ -31,5 +31,5 @@ Create a new file `credentials.json` from `credentials.json.template`. Fill in t
 Every 5 seconds the database will be queried and if triggered, the QRF dispatcher will be called.
 
 ```console
-$ python src.py
+$ python src.py [--initial-newer-than 'YYYY-MM-DD hh:mm:ss']
 ```

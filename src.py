@@ -157,13 +157,13 @@ if __name__ == "__main__":
             return datetime.strptime(inp, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             raise ArgumentTypeError(
-                f"Input did match format YYYY-MM-DD HH:MM:SS - {inp!r}"
+                f"Input did match format YYYY-MM-DD hh:mm:ss - {inp!r}"
             )
 
     parser = ArgumentParser()
     parser.add_argument(
         "--initial-newer-than",
-        help="Surround value in quotes. Expects format 'YYYY-MM-DD HH:MM:SS'",
+        help="Surround value in quotes. Expects format 'YYYY-MM-DD hh:mm:ss'",
         type=_dt,
         default=datetime.now(),
     )
