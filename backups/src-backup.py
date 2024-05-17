@@ -40,7 +40,7 @@ ENG = db.create_engine(db.URL.create("mysql+mysqlconnector", **creds["database"]
 # Import Rachel Zhou's Important Places Coordinate system (edited to handshake with Jack's code and Triggers code.
 # ================================================================================================================
 
-data = pd.read_csv('WHIMC Coordinate Tracking updated.csv')
+data = pd.read_csv('../WHIMC Coordinate Tracking updated.csv')
 
 # Fill forward 'World' and 'Object' columns to handle blank cells
 data['World'].fillna(method='ffill', inplace=True)

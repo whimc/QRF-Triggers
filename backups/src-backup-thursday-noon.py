@@ -44,7 +44,7 @@ ENG = db.create_engine(db.URL.create("mysql+mysqlconnector", **creds["database"]
 # ================================================================================================================
 
 
-data = pd.read_csv("WHIMC Coordinate Tracking updated.csv")
+data = pd.read_csv("../WHIMC Coordinate Tracking updated.csv")
 
 # Fill forward 'World' and 'Object' columns to handle blank cells
 data["World"].fillna(method="ffill", inplace=True)
