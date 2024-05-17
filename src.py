@@ -162,6 +162,20 @@ from whimc_sciencetools
 where from_unixtime(time / 1000) >= '{newer_than}'
 """
 
+GET_PERIMETERS = """
+select region_id
+     , world_id
+     , min_x
+     , min_y
+     , min_z
+     , max_x
+     , max_y
+     , max_z
+from rg_region_cuboid where region_id = 'perimeter'
+-- this could also include selecting regions for kid bases, we'd want to standardize naming conventions 
+-- though you could just assume that any region that's not perimeter on a mars world is a kid base
+"""
+
 # =============================================================================
 # Utility Functions (get from WHIMC, send to Dispatcher)
 # =============================================================================
