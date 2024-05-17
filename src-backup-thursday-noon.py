@@ -778,10 +778,7 @@ class Fetcher:
             "kill",
             "help",
             "pvp",
-            "/sphere",
-            "sphere",
-            "/hsphere",
-            "hsphere"
+            "agent chat"
         ]
 
         for _, row in self.commands.iterrows():
