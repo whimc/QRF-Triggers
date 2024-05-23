@@ -162,7 +162,7 @@ from whimc_sciencetools
 where from_unixtime(time / 1000) >= '{newer_than}'
 """
 
-GET_PERIMETERS = """
+GET_WORLD_PERIMETERS = """
 select region_id
      , world_id
      , min_x
@@ -172,8 +172,25 @@ select region_id
      , max_y
      , max_z
 from rg_region_cuboid where region_id = 'perimeter'
--- this could also include selecting regions for kid bases, we'd want to standardize naming conventions 
--- though you could just assume that any region that's not perimeter on a mars world is a kid base
+-- we could also include selecting regions for kid bases, we'd want to standardize naming conventions,
+-- though you could just assume that any region that's not perimeter on a mars build world is a kid base
+"""
+
+GET_BLOCKS = """
+select user
+      , world_id, x, y, z
+      , type
+      , action
+from co_block where wid = 111 and
+-- this should be a variable defined at startup, not hardcoded; wid 111 = sdp7
+where from_unixtime(time) >= '{newer_than}'
+-- timestamp is 10 digit unix precision
+"""
+
+GET_MATERIALS = """
+select id
+      , material
+from co_material_map
 """
 
 # =============================================================================
@@ -411,23 +428,40 @@ class Fetcher:
     # =============================================================================
 
     def check_activities_near_important_places(self):
+        #now includes aliases
         slash_commands_in_expected_actions = [
-            "tides",
-            "wind",
             "airflow",
-            "observe",
-            "year",
-            "temperature",
-            "humidity",
-            "radiation",
-            "pressure",
-            "radiation_cosmicrays",
+            "wind",
+            "altitude",
+            "height",
             "atmosphere",
+            "composition",
+            "cosmicrays",
             "gravity",
-            "radius",
+            "humidity",
+            "water",
+            "vapor",
             "magnetic_field",
-            "daylength",
+            "oxygen",
+            "pressure",
             "air_pressure",
+            "atmosphere_pressure",
+            "radiation",
+            "radius",
+            "rotational_period",
+            "daylength",
+            "scale",
+            "tectonic",
+            "seismic",
+            "temperature",
+            "temp",
+            "tides",
+            "ocean_level",
+            "tilt",
+            "axial_tilt",
+            "year",
+            "orbital_period",
+            "observe",
         ]
 
         # handle observations
