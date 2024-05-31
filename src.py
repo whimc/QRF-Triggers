@@ -30,6 +30,8 @@ import math
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
+import threading
+from collections import defaultdict
 
 # =============================================================================
 # Database Connection
@@ -107,8 +109,22 @@ GET_TABLES = """
 SHOW TABLES;
 """
 
-GET_ALL_CO_SESSION = """
-DESCRIBE whimc_player_positions;
+'''
+GET_PEEK = """
+DESCRIBE whimc_chat;
+"""
+'''
+
+GET_PEEK = """
+SELECT * from co_user;
+"""
+
+GET_CO_CHAT = """
+SELECT * from co_chat where time > (unix_timestamp(current_timestamp) - 60);
+"""
+
+GET_CO_USER = """
+SELECT * from co_user;
 """
 
 # Extended GET_ONLINE_PLAYERS TO have current world data
@@ -252,26 +268,38 @@ def get_data(query, newer_than: datetime | None = None) -> pd.DataFrame:
 # The Fetcher Class
 # =============================================================================
 
-
 class Fetcher:
     CMDS = {
         "commands": GET_COMMANDS,
         "observations": GET_OBSERVATIONS,
         "science_tools": GET_SCIENCE_TOOLS,
         "players": GET_ONLINE_PLAYERS,
+        "peek": GET_PEEK,
+        "co_chat": GET_CO_CHAT,
+        "co_user": GET_CO_USER
     }
 
+    def load_data(self):
+        for key, query in Fetcher.CMDS.items():
+            df = get_data(query, self.newer_than)
+            setattr(self, key, df)
+            
     def __init__(self, initial_newer_than, saveload_file=None):
         self.newer_than = initial_newer_than
         self.saveload_file = saveload_file
         # self.players = get_data(GET_ONLINE_PLAYERS)
-        # self.co_session = get_data(GET_ALL_CO_SESSION)
+        
 
         # Mostly for type hinting
         self.commands = pd.DataFrame()
         self.observations = pd.DataFrame()
         self.science_tools = pd.DataFrame()
         self.players = pd.DataFrame()
+        self.peek = pd.DataFrame()
+        self.co_chat = pd.DataFrame()
+        self.co_user = pd.DataFrame()
+        
+        self.load_data()
 
         # this is for random trigger that fires when inactivity is detected
         # does not matter which timezone, we just need a timer interval to detect inactivty since the time the python script was ran
@@ -288,6 +316,7 @@ class Fetcher:
             self.tools_usage = {}
 
         self.observations_record = {}
+        self.pair_durations = defaultdict(int)
 
     def save_tools_usage(self):
         if self.saveload_file:
@@ -301,9 +330,33 @@ class Fetcher:
         for key, query in Fetcher.CMDS.items():
             df = get_data(query, self.newer_than)
             # Set 'self.<key>' to the new dataframe
+            '''
+            if key == "peek":
+                print ("PEEK")
+                print (df)
+            '''
+                
             setattr(self, key, df)
 
         self.save_tools_usage()  # save after fetching the data
+        
+    def fetch_data_playersonly(self):
+        for key, query in Fetcher.CMDS.items():
+            if key == "players":
+                df = get_data(query, self.newer_than)
+                # Set 'self.<key>' to the new dataframe
+                setattr(self, key, df)
+
+        self.save_tools_usage()  # save after fetching the data    
+    
+    def fetch_data_observationsonly(self):
+        for key, query in Fetcher.CMDS.items():
+            if key == "observations":
+                df = get_data(query, self.newer_than)
+                # Set 'self.<key>' to the new dataframe
+                setattr(self, key, df)
+
+        self.save_tools_usage()  # save after fetching the data    
 
     def on_wakeup(self):
         # Use global variables
@@ -339,8 +392,11 @@ class Fetcher:
         if not self.science_tools.empty:
             print(f"\033[95m\nSCIENCE TOOLS:\033[0m\n{self.science_tools}\n")
 
-        if self.observations_record:  # Assuming observations_record is a dictionary
+        if self.observations_record:  # Assuming observations_record is a dictionary: nts: Check this occassionally
             print(f"\033[95m\nOBSERVATIONS RECORD:\033[0m\n{self.observations_record}\n")
+            
+        if not self.co_chat.empty: 
+            print(f"\033[95m\nLATEST CHATS:\033[0m\n{self.co_chat}\n")
         
         # print(f"CO_SESSION:\n{self.co_session}\n")
 
@@ -365,8 +421,18 @@ class Fetcher:
                         current_world: 0
                     },  # For per-world observation count
                     "last_observation_time": position_time,
+                    # "last_observation_time": position_time,
                     "mynoa_start_time": None,
                     "mynoa_trigger_fired": False,
+                    "recent_positions": [], # racing / non-stopping
+                    "recent_observations": [],
+                    "tool_usage_timestamps": [],
+                    "last_tool_use_time": position_time,
+                    # "last_tool_use_time": position_time,
+                    "far_from_crowd_duration": 0,
+                    "npc_interaction_start": None,
+                    "poi_stay_start": None
+
                 }
             else:
                 # Update the current world
@@ -375,13 +441,38 @@ class Fetcher:
                 # Add to worlds_visited if not already there
                 if current_world not in self.tools_usage[user]["worlds_visited"]:
                     self.tools_usage[user]["worlds_visited"].append(current_world)
+                    
+                # Racing / non-stopping 
+                if 'recent_positions' not in self.tools_usage[user]:
+                    self.tools_usage[user]['recent_positions'] = []
+
+                '''
+                # Reset last observation and tool use times
+                print(f"Resetting times for user {user}")
+                self.tools_usage[user]["last_observation_time"] = now.timestamp()
+                self.tools_usage[user]["last_tool_use_time"] = now.timestamp()
+                print(f"Last observation time: {self.tools_usage[user]['last_observation_time']}")
+                print(f"Last tool use time: {self.tools_usage[user]['last_tool_use_time']}")
+                '''       
 
         # check for triggers and populate triggers_list
         self.update_tool_usage()
         self.update_observation_usage()
         self.check_mynoa_observations()
         self.check_activities_near_important_places()
-
+        
+        # summer2024newtriggers
+        self.check_no_observations_last_20_minutes()
+        self.check_racing_non_stopping()
+        self.check_3_observations_in_2_minutes()
+        self.check_3_tools_in_1_minute()
+        self.check_last_tool_use_over_20_minutes()
+        self.check_3_chat_entries_in_1_minute()
+        self.check_long_pair_close()
+        self.check_long_far_from_crowd()
+        self.check_prolonged_interaction_npc() 
+        self.check_prolonged_stay_poi()
+        
         # print(f"TOOLS & OBSERVATION USAGE (SAVED): \n{self.tools_usage}\n")
 
         # Send all triggers
@@ -694,13 +785,20 @@ class Fetcher:
                 self.tools_usage[user]["mynoa_trigger_fired"] = False
 
     def update_observation_usage(self):
+        central_tz = pytz.timezone("America/Chicago")
+        
         for _, row in self.observations.iterrows():
             user = row["username"]
             world = row["world"]
+            position_time = row["time"]
 
-            # =============================================================================
-            # Detect Observations placed near previous existing observations + send trigger
-            # =============================================================================
+            
+            # Convert position_time to a string if it's a Timestamp
+            if isinstance(position_time, pd.Timestamp):
+                position_time = position_time.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Convert position_time to a timestamp in central timezone
+            position_time = datetime.strptime(position_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=central_tz).timestamp()
 
             x = row["x"]
             z = row["z"]
@@ -713,12 +811,9 @@ class Fetcher:
 
             # Check for nearby observations
             for obs_x, obs_z, obs_user, obs_text in self.observations_record[world]:
-                # if user != obs_user:  # Avoid comparing the observation with itself <- important, let me know if comparison with same obs is allowed
                 distance = abs(x - obs_x) + abs(z - obs_z)  # Manhattan distance
                 if 0 < distance < 10:
-                    similarity = difflib.SequenceMatcher(
-                        None, observation_text, obs_text
-                    ).ratio()
+                    similarity = difflib.SequenceMatcher(None, observation_text, obs_text).ratio()
                     print(f"obs distance is: {distance}, similarity is: {similarity}")
 
                     trigger_message = f"{user} made an observation near another observation in {world}. Difflib similarity is {similarity}"
@@ -726,22 +821,19 @@ class Fetcher:
                     self.triggers_list.append((trigger_message, user, 3))
                     break  # Exit after finding one nearby observation to avoid multiple triggers for the same event
 
-            # =============================================================================
-            # /Detect Observations placed near previous existing observations + send trigger
-            # =============================================================================
-
             if user not in self.tools_usage:
                 self.tools_usage[user] = {
                     "worlds_visited": [world],
                     "current_world": world,
                     "total_observation_count": 0,  # For overall observation count
-                    "world_observation_counts": {
-                        world: 0
-                    },  # For per-world observation count
+                    "world_observation_counts": {world: 0},  # For per-world observation count
+                    "last_observation_time": position_time,  # Initialize last observation time
+                    "recent_observations": [position_time],  # Initialize recent observations list
                 }
             else:
                 self.tools_usage[user]["total_observation_count"] += 1
                 self.tools_usage[user]["current_world"] = world
+                self.tools_usage[user]["last_observation_time"] = position_time  # Update last observation time
 
                 if world not in self.tools_usage[user]["worlds_visited"]:
                     self.tools_usage[user]["worlds_visited"].append(world)
@@ -749,24 +841,28 @@ class Fetcher:
                 if world not in self.tools_usage[user]["world_observation_counts"]:
                     self.tools_usage[user]["world_observation_counts"][world] = 0
 
-            self.tools_usage[user]["world_observation_counts"][world] += 1
+                self.tools_usage[user]["world_observation_counts"][world] += 1
+
+                # Add the current observation time to the list of recent observations
+                self.tools_usage[user].setdefault("recent_observations", []).append(position_time)
+
+                # Keep only the observations from the last 2 minutes
+                current_time = datetime.now(central_tz).timestamp()
+                self.tools_usage[user]["recent_observations"] = [
+                    t for t in self.tools_usage[user]["recent_observations"] if current_time - t <= 2 * 60
+                ]
 
         for user, data in self.tools_usage.items():
             worlds_visited = data["worlds_visited"]
             current_world = data["current_world"]
-            # world_observation_count = data['world_observation_counts'].get(current_world, 0)
-            world_observation_count = data.get("world_observation_counts", {}).get(
-                current_world, 0
-            )
+            world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
 
             # Check for lack of observations
             if len(worlds_visited) >= 3:
                 trigger_key = f"no_observations_since_third_{current_world}"
                 if not data.get(trigger_key, False):
                     if len(worlds_visited) == 3 and world_observation_count == 0:
-                        trigger_message = (
-                            f"{user} has not made any observations by the third world."
-                        )
+                        trigger_message = f"{user} has not made any observations by the third world."
                         print(trigger_message)
                         self.triggers_list.append((trigger_message, user, 2))
                         data[trigger_key] = True
@@ -780,30 +876,116 @@ class Fetcher:
             high_obs_trigger_key = f"high_observations_{current_world}"
             if len(worlds_visited) <= 3 and world_observation_count > 10:  # 10
                 if not data.get(high_obs_trigger_key, False):
-                    print(
-                        f"{user} has made more than 10 observations in {current_world}."
-                    )
-                    self.triggers_list.append(
-                        (
-                            f"{user} has high observation count in {current_world}",
-                            user,
-                            7,
-                        )
-                    )
+                    print(f"{user} has made more than 10 observations in {current_world}.")
+                    self.triggers_list.append((f"{user} has high observation count in {current_world}", user, 7))
                     data[high_obs_trigger_key] = True
             elif len(worlds_visited) > 3 and world_observation_count > 5:  # 5
                 if not data.get(high_obs_trigger_key, False):
-                    print(
-                        f"{user} has made more than 5 observations in {current_world}."
-                    )
-                    self.triggers_list.append(
-                        (
-                            f"{user} has high observation count in {current_world}",
-                            user,
-                            7,
-                        )
-                    )
+                    print(f"{user} has made more than 5 observations in {current_world}.")
+                    self.triggers_list.append((f"{user} has high observation count in {current_world}", user, 7))
                     data[high_obs_trigger_key] = True
+
+    def check_no_observations_last_20_minutes(self):
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+        
+        time_dilation = 3006
+
+        for user, data in self.tools_usage.items():
+            last_observation_time = data.get("last_observation_time", 0)
+            if current_time - last_observation_time + time_dilation > 20 * 60:  # 20 minutes
+                
+                print("current_time", current_time)
+                print("last_observation_time", last_observation_time)
+                print("current_time - last_observation_time + time_dilation", current_time - last_observation_time + time_dilation)
+                
+                
+                trigger_message = f"{user} has not made any observations in the last 20 minutes."
+                self.triggers_list.append((trigger_message, user, 1))
+                print(trigger_message)
+                # Reset last_observation_time to 1 minute before the current time
+                # self.tools_usage[user]["last_observation_time"] = current_time + time_dilation - 10  # 1 minute breathing time before next trigger
+                self.tools_usage[user]["last_observation_time"] = current_time + time_dilation  # 1 minute breathing time before next trigger
+                
+                print("last observation time changed to", self.tools_usage[user]["last_observation_time"], "with breathing time of 1 minute")
+                
+            else:
+                
+                print("no trigger", user)
+                print("current_time", current_time)
+                print("last_observation_time", last_observation_time)
+                print("current_time - last_observation_time + time_dilation", current_time - last_observation_time + time_dilation)
+                
+                
+    def check_last_tool_use_over_20_minutes(self):
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+        
+        time_dilation = 3006
+
+        for user, data in self.tools_usage.items():
+            last_tool_use_time = data.get("last_tool_use_time", 0)
+            if current_time - last_tool_use_time + time_dilation > 20 * 60:  # 20 minutes
+                
+                print("current_time", current_time)
+                print("last_tool_use_time", last_tool_use_time)
+                print("current_time - last_tool_use_time + time_dilation", current_time - last_tool_use_time + time_dilation)
+                
+                
+                trigger_message = f"{user} has not used any tools in the last 20 minutes."
+                self.triggers_list.append((trigger_message, user, 1))
+                print(trigger_message)
+                # Reset last_tool_use_time to 1 minute before the current time
+                # self.tools_usage[user]["last_tool_use_time"] = current_time + time_dilation - 60  # 1 minute breathing time before next trigger
+                self.tools_usage[user]["last_tool_use_time"] = current_time + time_dilation  # 1 minute breathing time before next trigger
+                
+                print(f"last tool use time changed to {self.tools_usage[user]['last_tool_use_time']} with breathing time of 1 minute")
+                
+            else:
+                
+                print("no trigger", user)
+                print("current_time", current_time)
+                print("last_tool_use_time", last_tool_use_time)
+                print("current_time - last_tool_use_time + time_dilation", current_time - last_tool_use_time + time_dilation)
+                
+
+    def check_3_chat_entries_in_1_minute(self):
+        # Merge co_chat and co_user to get usernames
+        merged_df = pd.merge(self.co_chat, self.co_user, left_on='user', right_on='rowid')
+
+        '''
+        print(merged_df.head())
+        print(merged_df.columns)
+        '''
+
+        # Get the current time in the correct timezone
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        # Track chat entries for each user
+        chat_count = merged_df['user_x'].value_counts()  # Adjusted column name
+
+        for user, count in chat_count.items():
+            if count >= 3:
+                # Fetch the username
+                username = merged_df[merged_df['user_x'] == user]['user_y'].iloc[0]  # Adjusted column name
+
+                # Create a trigger message
+                trigger_message = f"{username} has made 3 or more chat entries in the last minute."
+                self.triggers_list.append((trigger_message, username, 1))
+                print(trigger_message)
+
+    def check_3_observations_in_2_minutes(self):
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+        for user, data in self.tools_usage.items():
+            recent_observations = data.get("recent_observations", [])
+            if len(recent_observations) >= 3:
+                trigger_message = f"{user} has made 3 observations in the last 2 minutes."
+                self.triggers_list.append((trigger_message, user, 1))
+                print(trigger_message)
+                # Clear recent observations to avoid repeated triggers
+                self.tools_usage[user]["recent_observations"] = []
 
     def update_tool_usage(self):
         # Define lists of tools for different usage checks
@@ -832,21 +1014,31 @@ class Fetcher:
             "hsphere"
         ]
 
+        science_tools = multi_use_tools + single_use_tools
+        central_tz = pytz.timezone("America/Chicago")  # Ensure we use the correct timezone
+
         for _, row in self.commands.iterrows():
             user = row["username"]
             world = row["world"]
             message = row["message"].strip()
-            x = row["x"]
-            z = row["z"]
+            position_time = row["time"]
+
+            # Convert position_time to a string if it's a Timestamp
+            if isinstance(position_time, pd.Timestamp):
+                position_time = position_time.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Convert position_time to a timestamp in central timezone
+            timestamp = datetime.strptime(position_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=central_tz).timestamp()
 
             # Initialize the user in the dictionary if not present
             if user not in self.tools_usage:
                 self.tools_usage[user] = {}
                 self.tools_usage[user]["worlds_visited"] = []
+                self.tools_usage[user]["tool_usage_timestamps"] = []  # Initialize tool usage timestamps
+                self.tools_usage[user]["last_tool_use_time"] = timestamp  # Initialize last tool use time
 
             # Check for known tools in the message
-            for tool in multi_use_tools + single_use_tools:
-                # if f'/{tool}' in message:
+            for tool in science_tools:
                 if message.startswith(f"/{tool}"):
                     tool_key = f"{tool}_{world}"  # Unique key for each tool and world
 
@@ -856,13 +1048,25 @@ class Fetcher:
                         self.tools_usage[user][f"{tool_key}_flag"] = 0  # Usage flag
 
                     # Increment the count for the tool
-                    # self.tools_usage[user][tool_key] += 1 # test don't increment on initialize anymore because the update_tools_usage does so already.
+                    self.tools_usage[user][tool_key] += 1
 
                     # Always update what world the user currently is in
                     self.tools_usage[user]["current_world"] = world
 
                     if world not in self.tools_usage[user]["worlds_visited"]:
                         self.tools_usage[user]["worlds_visited"].append(world)
+
+                    # Add the current tool usage timestamp to the list
+                    self.tools_usage[user]["tool_usage_timestamps"].append(timestamp)
+
+                    # Update the last tool use time
+                    self.tools_usage[user]["last_tool_use_time"] = timestamp
+
+                    # Keep only the tool usages from the last 1 minute
+                    current_time = datetime.now(central_tz).timestamp()
+                    self.tools_usage[user]["tool_usage_timestamps"] = [
+                        t for t in self.tools_usage[user]["tool_usage_timestamps"] if current_time - t <= 60
+                    ]
 
         # Process the recorded usage to trigger events or logging
         for user, data in self.tools_usage.items():
@@ -1000,6 +1204,276 @@ class Fetcher:
                         )
                         self.tools_usage[user][tool_flag_key] = 1
 
+    def check_3_tools_in_1_minute(self):
+        for user, data in self.tools_usage.items():
+            tool_usage_timestamps = data.get("tool_usage_timestamps", [])
+            if len(tool_usage_timestamps) >= 3:
+                trigger_message = f"{user} has used at least 3 tools in less than a minute."
+                self.triggers_list.append((trigger_message, user, 1))
+                print(trigger_message)
+                # Clear the tool usage timestamps to avoid repeated triggers
+                self.tools_usage[user]["tool_usage_timestamps"] = []
+        
+    def check_racing_non_stopping(self):
+        X = 20 # this means 20 intervals based on the summer2024 trigger slides, change to taste.
+        for user, data in self.tools_usage.items():
+            recent_positions = data.get('recent_positions', [])
+            # if len(recent_positions) < 20:
+            if len(recent_positions) < X:
+                continue  # Skip if there are less than 20 positions
+                
+            if len(recent_positions) > X+1:
+                self.tools_usage[user]['recent_positions'] = []
+
+            stops = 0
+            for i in range(1, len(recent_positions)):
+                prev_x, prev_z = recent_positions[i - 1]
+                curr_x, curr_z = recent_positions[i]
+                distance = abs(curr_x - prev_x) + abs(curr_z - prev_z)
+                if distance < 10:
+                    stops += 1
+
+            if stops < 2:
+                trigger_message = f"{user} has less than 2 stops in the last 20 intervals (racing/non-stopping)."
+                self.triggers_list.append((trigger_message, user, 1))
+                print(trigger_message)   
+                self.tools_usage[user]['recent_positions'] = []
+
+    def update_positions_every_3_seconds(self):
+        while True:
+        
+            self.fetch_data_playersonly() # re-fetch the player position data.
+        
+            for _, row in self.players.iterrows():
+                user = row['online_user']
+                current_world = row['world']
+                x = row['x']
+                z = row['z']
+
+                # this thread will fire first when ran technically so ensure a new user is instantiated in case.
+                # Initialize the user if not present
+                if user not in self.tools_usage:
+                    self.tools_usage[user] = {
+                        "worlds_visited": [],
+                        "current_world": "",
+                        "tool_use_count": 0,
+                        "total_observation_count": 0,
+                        "world_observation_counts": {},
+                        "last_observation_time": 0,
+                        "mynoa_start_time": None,
+                        "mynoa_trigger_fired": False,
+                        "recent_positions": [],
+                        "recent_observations": [],
+                        "tool_usage_timestamps": [],
+                        "last_tool_use_time": 0,
+                    }
+
+                if 'recent_positions' not in self.tools_usage[user]:
+                    self.tools_usage[user]['recent_positions'] = []
+
+                # Only append if the new position is different from the last recorded position
+                if not self.tools_usage[user]['recent_positions'] or self.tools_usage[user]['recent_positions'][-1] != (x, z):
+                    self.tools_usage[user]['recent_positions'].append((x, z))
+
+                    # Keep only the last 20 positions
+                    if len(self.tools_usage[user]['recent_positions']) > 20:
+                        self.tools_usage[user]['recent_positions'].pop(0)
+
+            sleep(3)  # Wait for 3 seconds before updating again
+
+    def check_long_pair_close(self):
+        proximity_threshold = 35  # Define how close players need to be (in blocks)
+        duration_increment = 3  # Increment duration by 3 seconds if within proximity
+        duration_threshold = 9  # Define the duration threshold (in seconds)
+        
+        # Dictionary to keep track of pairs and their close duration
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        # Iterate over all players and calculate distances
+        for i, row_i in self.players.iterrows():
+            user_i = row_i['online_user']
+            world_i = row_i['world']
+            x_i, z_i = row_i['x'], row_i['z']
+
+            for j, row_j in self.players.iterrows():
+                if i >= j:
+                    continue  # Skip pairs we've already checked or self-pairs
+                user_j = row_j['online_user']
+                world_j = row_j['world']
+                x_j, z_j = row_j['x'], row_j['z']
+
+                # Only consider players in the same world
+                if world_i == world_j:
+                    distance = ((x_i - x_j) ** 2 + (z_i - z_j) ** 2) ** 0.5
+                    if distance <= proximity_threshold:
+                        # Increment the close duration for this pair
+                        self.pair_durations[(user_i, user_j)] += duration_increment
+
+        # Check if any pair has been close for longer than the duration threshold
+        for (user_i, user_j), duration in self.pair_durations.items():
+            if duration >= duration_threshold:
+                trigger_message = f"{user_i} and {user_j} have been close to each other for more than 30 seconds."
+                self.triggers_list.append((trigger_message, user_i, 1))
+                # self.triggers_list.append((trigger_message, user_j, 1)) # comment this out if we want to duplicate the trigger
+                print(trigger_message)
+                # Reset duration to avoid repeated triggers
+                self.pair_durations[(user_i, user_j)] = 0
+            else: 
+                print ("pair_durations")
+                print (self.pair_durations)
+                
+    def check_long_far_from_crowd(self):
+        proximity_threshold = 35  # Define how far players need to be (in blocks)
+        duration_increment = 3  # Increment duration by 3 seconds if beyond proximity
+        duration_threshold = 9  # Define the duration threshold (in seconds)
+
+        # Dictionary to keep track of players and their far from crowd duration
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        # Iterate over all players to calculate distances
+        for i, row_i in self.players.iterrows():
+            user_i = row_i['online_user']
+            world_i = row_i['world']
+            x_i, z_i = row_i['x'], row_i['z']
+            far_from_crowd = True
+
+            for j, row_j in self.players.iterrows():
+                if i == j:
+                    continue  # Skip self-pairs
+                user_j = row_j['online_user']
+                world_j = row_j['world']
+                x_j, z_j = row_j['x'], row_j['z']
+
+                # Only consider players in the same world
+                if world_i == world_j:
+                    distance = ((x_i - x_j) ** 2 + (z_i - z_j) ** 2) ** 0.5
+                    if distance <= proximity_threshold:
+                        far_from_crowd = False
+                        break  # Exit the inner loop if any player is within proximity
+
+            if far_from_crowd:
+                # Increment the far from crowd duration for this player
+                self.tools_usage[user_i].setdefault('far_from_crowd_duration', 0)
+                self.tools_usage[user_i]['far_from_crowd_duration'] += duration_increment
+            else:
+                self.tools_usage[user_i]['far_from_crowd_duration'] = 0  # Reset if not far
+
+        # Check if any player has been far from the crowd for longer than the duration threshold
+        for user, data in self.tools_usage.items():
+            far_from_crowd_duration = data.get('far_from_crowd_duration', 0)
+            if far_from_crowd_duration >= duration_threshold:
+                trigger_message = f"{user} has been far from the crowd for more than 30 seconds."
+                self.triggers_list.append((trigger_message, user, 1))
+                print(trigger_message)
+                # Reset duration to avoid repeated triggers
+                self.tools_usage[user]['far_from_crowd_duration'] = 0
+            else:
+                print (user)
+                print (self.tools_usage[user]['far_from_crowd_duration'])
+
+    def check_prolonged_interaction_npc(self):
+        interaction_threshold = 4  # Distance threshold to consider interaction
+        duration_threshold = 60  # Duration threshold in seconds
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+        disabled_worlds = ["LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen", "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"]
+
+        for _, row in self.players.iterrows():
+            user = row["online_user"]
+            current_world = row["world"]
+            x, z = row["x"], row["z"]
+
+            if current_world in disabled_worlds:
+                continue  # Skip disabled worlds
+
+            interacting_with_npc = False
+
+            for object_name, details in world_coordinates_dictionary.get(current_world, {}).get("NPCs", {}).items():
+                npc_x, npc_z = details["x"], details["z"]
+                distance = abs(x - npc_x) + abs(z - npc_z)  # Manhattan distance
+
+                # print(f"Checking distance between {user} and {object_name}: {distance}")
+
+                if distance < interaction_threshold:
+                    interacting_with_npc = True
+                    if "npc_interaction_start" not in self.tools_usage[user]:
+                        self.tools_usage[user]["npc_interaction_start"] = current_time
+                        print(f"Setting npc_interaction_start for {user} at {current_time}")
+                    interaction_start_time = self.tools_usage[user]["npc_interaction_start"]
+                    if current_time - interaction_start_time >= duration_threshold:
+                        trigger_message = f"{user} has been interacting with NPC {object_name} for more than 60 seconds."
+                        self.triggers_list.append((trigger_message, user, 1))
+                        print(trigger_message)
+                        # Reset interaction start time to avoid repeated triggers
+                        self.tools_usage[user]["npc_interaction_start"] = current_time - 50  # 10 seconds breathing time
+                    else:
+                        # print("User")
+                        # print(user)
+                        # print("NPC")
+                        # print(object_name)
+                        # print("Time")
+                        print(current_time, interaction_start_time, current_time - interaction_start_time)
+                    break
+
+            if not interacting_with_npc:
+                if "npc_interaction_start" in self.tools_usage[user]:
+                    print(f"Removing npc_interaction_start for {user} as they moved away from all NPCs")
+                self.tools_usage[user].pop("npc_interaction_start", None)
+
+    def check_prolonged_stay_poi(self):
+        duration_threshold = 90  # Duration threshold in seconds
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+        disabled_worlds = ["LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen", "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"]
+
+        for _, row in self.players.iterrows():
+            user = row["online_user"]
+            current_world = row["world"]
+            x, z = row["x"], row["z"]
+
+            if current_world in disabled_worlds:
+                continue  # Skip disabled worlds
+
+            staying_in_poi = False
+
+            for object_type, objects in world_coordinates_dictionary.get(current_world, {}).items():
+                if object_type == "Global":
+                    continue  # Skip global actions
+
+                for object_name, details in objects.items():
+                    if "range" in details:
+                        if self.is_point_inside_space(x, z, details["range"]):
+                            staying_in_poi = True
+                            if "poi_stay_start" not in self.tools_usage[user]:
+                                self.tools_usage[user]["poi_stay_start"] = current_time
+                                print(f"Setting poi_stay_start for {user} at {current_time}")
+                            poi_stay_start_time = self.tools_usage[user]["poi_stay_start"]
+                            if current_time - poi_stay_start_time >= duration_threshold:
+                                trigger_message = f"{user} has been within POI {object_name} for more than 90 seconds."
+                                self.triggers_list.append((trigger_message, user, 1))
+                                print(trigger_message)
+                                # Reset stay start time to avoid repeated triggers
+                                self.tools_usage[user]["poi_stay_start"] = current_time - 80  # 10 seconds breathing time
+                            else:
+                                # print("User")
+                                # print(user)
+                                # print("POI")
+                                # print(object_name)
+                                # print("Time")
+                                print(current_time, poi_stay_start_time, current_time - poi_stay_start_time)
+                            break
+
+            if not staying_in_poi:
+                if "poi_stay_start" in self.tools_usage[user]:
+                    print(f"Removing poi_stay_start for {user} as they moved away from all POIs")
+                self.tools_usage[user].pop("poi_stay_start", None)
+
+
+
+
+
 
 # =============================================================================
 # Driver Program (main)
@@ -1051,6 +1525,12 @@ if __name__ == "__main__":
 
     central_tz = pytz.timezone("America/Chicago")
     fetcher = Fetcher(args.initial_newer_than, args.saveload)
+
+    # Start a new thread for updating positions every 3 seconds
+    position_thread = threading.Thread(target=fetcher.update_positions_every_3_seconds)
+    position_thread.daemon = True  # This makes sure the thread will exit when the main program exits
+    position_thread.start()
+
     while True:
         fetcher.on_wakeup()
         
@@ -1058,7 +1538,8 @@ if __name__ == "__main__":
         
         current_time = datetime.now().timestamp()
         if (
-            current_time - fetcher.last_trigger_time > 34
+            # current_time - fetcher.last_trigger_time > 34
+            current_time - fetcher.last_trigger_time > 9999999 #turn off random trigger during testing
         ):  # Check if 34 seconds have passed
             if not fetcher.triggers_list:  # Check if no trigger has been sent recently
                 online_students = fetcher.players["online_user"].tolist()
