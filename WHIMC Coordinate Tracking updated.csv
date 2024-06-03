@@ -4,9 +4,12 @@ NoMoon,Global,NA,,,,"/tides, /wind, /airflow",strongly hints to observe and comp
 ,,Turbine control,-95,50,"(-105,49) (-95,49) (-95,52) (-100,57) (-105,58)",,
 ,,Wind Turbine,,,"(-136,107) (-142,107) (-142,123) (-136,123)",,
 ,,Landed spaceship,,,"(-70,-23) (-55,-23) (-55,-8) (-70,-8)",,It's kind of a distraction because kids may be thinking to leave the level
-,,Ground water,,,"(-84,-58) (-77,-50)","/temperature, /humidity, /pressure, /composition","This is a pit below sea level, the settings picked up are just the ocean"
-,,Hot Spring,,,"(-254,-227)(-221,-225)","/temperature, /humidity, /pressure, /composition","region ID spring-lake-1, there are floating hints for it"
-,,Wind-stripped areas,,,"(-420,190)(420,480)(200,190)(440,-250)(440,-250)(-450-450)(-450,-260)(-280,190)",,
+,,Ground water,,,"(-85,-50) (-77,-50) (-77,-57) (-85,-57)","/temperature, /humidity, /pressure, /composition","This is a pit below sea level, the settings picked up are just the ocean"
+,,Hot Spring,,,"(-254,-227) (-221,-227) (-221,-205) (-254,-205)","/temperature, /humidity, /pressure, /composition, /tides","region ID spring-lake-1, there are floating hints for it"
+,,Wind-stripped south,,,"(-420,190) (420,190) (420,480) (-420,480)",,
+,,Wind-stripped east,,,"(200,190) (440,190) (440,-250) (200,-250)",,
+,,Wind-stripped north,,,"(440,-250) (-450,-250) (-450,-450) (440,-450)",,
+,,Wind-stripped west,,,"(-450,-250) (-280,-250) (-280,190) (-450,190)",,
 ,NPCs,TravelAuthority,-2,1,,/observe,prompt to use /observe; visit botanist Tanya
 ,,Botanist,-1,12,,/wind,assign observation with wind quest
 ,,ElectricalEngineer,-101,52,,,

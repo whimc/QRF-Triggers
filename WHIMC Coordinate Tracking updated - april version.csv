@@ -1,0 +1,115 @@
+World,Object,Object_name,x,z,range,Expected_Action,Note
+NoMoon,Global,NA,,,,"/tides, /wind, /airflow",strongly hints to observe and compare /airflow and /wind
+,Place,Greenhouse,-2,4,"(-1,14) (-9,14) (-9,9) (-5,9) (-5,7) (-1,7)","/wind, /airflow, /temperature",
+,,Wind Rurbine,-95,50,"(-105,49) (-95,49) (-95,52) (-100,57) (-105,58)",,
+,,Windmill,,,"(-136,107) (-142,107) (-142,123) (-136,123)","/pressure, /humidity, /temperature","water in pond is different (-80, -54)"
+,,Mars Lander,,,"(-70,-23) (-55,-23) (-55,-8) (-70,-8)",,
+,,Hot Spring,,,"(-84,-58) (-77,-50)",,
+,NPCs,TravelAuthority,-2,1,,/observe,prompt to use /observe; visit botanist Tanya
+,,Botanist,-1,12,,/wind,assign observation with wind quest
+,,ElectricalEngineer,-101,52,,,
+ColderSun_HabitableStrip,Global,NA,,,,"/tides, /year",
+,Place,Bridge/Skyway,-89,-13,"(-89,-19) (268,-19) (268,-14) (-89,-14)",,
+,NPCs,ArtistAstronomer,-151,4,,,assign quest to see each side
+ColderSun_Hot,Global,NA,,,,"/tides, /year",
+,Place,Hot side building,,,"(-68,-47) (-93,-90)","/temperature, /humidity, /radiation",
+,,SolarPanel,,,"(-103,-40) (-86,-50)",,
+,NPCs,TeamLeader,-78,-55,,,explore and meet other NPCs
+,,ElectricalEngineer,-100,-45,,,
+,,Hydrologist,-93,-85,,,
+,,Xenobiologist,-86,-90,,,
+ColderSun_Cold,Global,NA,,,,"/tides, /year",
+,Place,Cold side building,-77,-48,"(-91,-44) (-55,-18)","/temperature, /humidity, /radiation",
+,,Underground complex,-84,-41,"(-94,-41) (-76,-59)",/temperature,
+,NPCs,TravelAuthority,-83,-41,,"visit -84, -41",talk to Botanist Vera
+,,Botanist,-84,-32,,,
+,,HydroEngineer,-60,-34,,,
+,,PowerController,-62,-23,,,
+TiltedEarth_JungleIsland,Global,NA,,,,"/tides, /radiation, /humidity, /temperature",
+,Data-based Signals,Heat Vents,418,-823,,"/temperature, /pressure",
+,,Bears,352,48,,,
+,,Rabbits,122,110,,,
+,,Axolotls,213,-83,,,
+,,Birds,278,345,,,
+,NPCs,QuantumAstrochemist,192,174,,,assign quest time traveler
+,,TowerMechanic,405,-448,,"visit 400, -453",visit other scientists
+,,Ornithologist,400,-453,,,
+,,Herpetologist,-95,-453,,,
+TiltedEarth_Frozen,Global,NA,,,,"/tides, /radiation, /humidity, /temperature",
+,Data-based Signals,Heat Vents,418,-823,,"/temperature, /pressure",
+,,Helicopter,358,-341,,,
+,,Portal to Melting,190,175,,,
+,Animals,Bears,346,-98,,,
+,,Rabbits,331,-248,,,
+,,Axolotls,418,-823,,,
+,NPCs,QuantumAstrochemist,192,174,,,assign quest time traveler
+,,TowerMechanic,405,-448,,"visit 400, -453",visit other scientists
+,,Ornithologist,400,-453,,,
+,,Herpetologist,-95,-453,,,
+TiltedEarth_Melting,Global,NA,,,,"/tides, /radiation, /humidity, /temperature",
+,Data-based Signals,Heat Vents,409,-809,,"/temperature, /pressure",
+,,Helicopter,348,-341,,,
+,,Portal to Warm,192,174,,,
+,Animals,Bears,216,-81,,,
+,,Rabbits,360,-74,,,
+,,Axolotls,409,-809,,,
+,,Birds,348,-341,,,
+,NPCs,QuantumAstrochemist,192,174,,,assign quest time traveler
+,,TowerMechanic,405,-448,,"visit 400, -453",visit other scientists
+,,Ornithologist,400,-453,,,
+,,Herpetologist,-95,-453,,,
+Mynoa_close,Global,NA,,,,"/magnetic_field, /tides, /temperature, /pressure",
+,NPCs,ShadowyMynoanCreature,1324,914,,"/observe, /temperature",give side quest
+Mynoa_half,Global,NA,,,,"/magnetic_field, /tides, /temperature, /humidity",
+,NPCs,Mysterious Mynoan,6,177,,"/observe, /temperature, /magnetic_field",give side quest
+Mynoa_far,Global,NA,,,,"/magnetic_field, /tides, /temperature, /humidity",
+,Place,Lighthouse,99,-447,"(100,-450) (105,-444)",,
+,,Museum,-21,-390,"(-12,-391) (-29,-375)",,
+,Data-based Signals,Loop Portal,-30,398,,,
+,,Water,,,,,too wide to track
+,,Volcano,,,,,
+,,Terrain,,,,,too wide to track
+,NPCs,MynoanCitizen,-7,-403,,/tides,measure tides outside the hosue
+,,Visitor,-22,-378,,"/temperature, /air_pressure, /gravity, /observe",give quest
+,,MuseumCurator,-19,-381,,,
+TwoMoons,Global,NA,,,,"/tides, /daylength, /temperature, /pressure",
+,Place,Museum,1,90,"(0,103) (-2,108) (-16,108) (-20,103) (-20,95) (-16,90) (-4,90)",,
+,NPCs,Worker,81,14,,,
+,,Kristina,50,93,,"visit 86, 109","give quest, talk to Tobias"
+,,Tobias,87,109,,/tides,give quest to measure tides
+,,Joel,-10,92,,visit TwoMoonsLluna world,prompt to explore Lluna
+,Data-based Signals,Kuu Fragment,-4,103,,,
+TwoMoonsLow,Global,NA,,,,"/tides, /daylength, /temperature, /pressure",
+,Place,Museum,2,99,"(-20,95) (-14,89) (-1,95) (0,10) (-3,109) (-16,109) (-19,106)",,
+,,Portal,49,93,"(38,98) (52,86)",,
+,NPCs,Worker,96,15,,,
+,,Kristina,42,93,,/daylength,give quest
+TwoMoonsLluna,Global,NA,,,,"/tides, /daylength, /temperature",
+,Place,View point of other moon,64,40,"(102,-68) (-38,-80)",,too wide to measure
+,NPCs,InformationAgent,64,79,,,
+Trappist,Global,NA,,,,"/year, /radiation_cosmicrays",
+,Place,Pond 3,-3,119,"(-12,120) (0,127) (8,121) (8,124) (0,145) (-4,154) (-7,159) (-13,158) (-20,151) (-13,158)",/atmosphere,xz coordinate indicate the stadning point to see hints
+,NPCs,Chemist,-35,6,,/atmosphere,assign quest
+Gliese,Global,NA,,,,"/gravity, /atmosphere, /temperature, /pressure, /radius",
+,NPCs,E.Mattson,5,40,,,
+,,Prospector,0,51,,/temperature,assign quest
+Cancri,Global,NA,,,,"/atmosphere, /gravity, /pressure, /radius",
+,NPCs,Surveyor,46,64,,/radiation,prompt to measure radiation
+Cancri_Cold,Global,NA,,,,"/atmosphere, /gravity, /pressure, /radius, /radiation, /temperature",
+,Place,Clound observation point,-29,80,"(-25,80) (-33,80)",/atmosphere,see what the clouds are made of
+,Data-based Signals,Drone launch,-35,8,,,what's the purpose (??)
+,NPCs,Pilot,-20,44,,"visit -12,32",visit docking rube to find Saige
+,,EngineerSaige,-12,32,,"visit -35, 8",launch a survey drone
+,,ResearcherNate,-41,5,,"visit -14, 67; /temperature, /atmosphere, /gravity",travel outside through airlock and take measurements
+,,ScientistKobey,25,16,,"/temperature, /atmosphere",take measurements
+,,GeologistGavin,-42,-11,,,
+Kepler,Global,,,,,"/atmosphere, /year, /gravity, /temperature, /radius",
+,Place,Sample collection,195,66,"(197,66) (197,67)",,turn on the machine to collect smaple
+,Data-based Signals,Bioresearch lab,269,-78,,,"resited access, not accessible"
+,,Kepler water,200,-78,,/atmosphere,hints of purple water
+,NPCs,ExonautExplorer,275,-34,,"visit 195, 66",give quest to collect samples
+,,Xenobotanist,269,-86,,,
+,,Astrozoologist,167,-7,,"/atmosphere; visit 195, 69",measure life in the lake and visit robot
+,,Robot,197,67,,,
+BrownDwarf,Global,NA,,,,"/atmosphere, /temperature, /year, /rotational_period, /radiation, /gravity",
+,NPCs,Quest,40,18,,,prompt to pilot probe
