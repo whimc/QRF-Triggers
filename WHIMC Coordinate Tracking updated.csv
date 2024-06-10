@@ -1,4 +1,16 @@
 World,Object,Object_name,x,z,range,Expected_Action,Note
+LunarCrater,Global,NA,,,,"/gravity, /temperature, /pressure, /airflow, /oxygen",
+,Place,PBS observatory,-215,33,"(-218,26) (-218,36) (-210,36) (-210,26)",,
+,NPCs,Recent arrival roger,-23,192,,,beckons explorers to do quests
+,,Administrator Wells,-6,164,,/gravity,promptsjump gravity observation
+,,Administrator Heinlein,-13,172,,,explains space suit is needed
+,,Overseer Blair,10,-5,,,quest to meet scientists
+,,Biology Huxley,-32,-21,,"/humidity, /airflow",explains biodome
+,,Facility manager Herbert,25,-65,,,bidome ventilation quest
+,,Materials scientist Olivia,55,-13,,/oxygen,quest to find leak
+,,Seismologist Misavo,67,105,,/temperature,quest for ice storage
+,,Gina Veramo,-217,33,,,PBS Nova staff
+,,Construction engineer Harlem,37,39,,/pressure,quest to check if airlock works
 NoMoon,Global,NA,,,,"/tides, /wind, /airflow",strongly hints to observe and compare /airflow and /wind
 ,Place,Greenhouse,-2,4,"(-1,14) (-9,14) (-9,9) (-5,9) (-5,7) (-1,7)","/wind, /airflow, /temperature, /humidity",
 ,,Turbine control,-95,50,"(-105,49) (-95,49) (-95,52) (-100,57) (-105,58)",,
