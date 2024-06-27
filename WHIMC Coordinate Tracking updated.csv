@@ -1,12 +1,27 @@
 World,Object,Object_name,x,z,range,Expected_Action,Note
+LunarCrater,Global,NA,,,,"/gravity, /temperature, /pressure, /airflow, /oxygen",
+,Place,PBS observatory,-215,33,"(-218,26) (-218,36) (-210,36) (-210,26)",,
+,NPCs,Recent arrival roger,-23,192,,,beckons explorers to do quests
+,,Administrator Wells,-6,164,,/gravity,promptsjump gravity observation
+,,Administrator Heinlein,-13,172,,,explains space suit is needed
+,,Overseer Blair,10,-5,,,quest to meet scientists
+,,Biology Huxley,-32,-21,,"/humidity, /airflow",explains biodome
+,,Facility manager Herbert,25,-65,,,bidome ventilation quest
+,,Materials scientist Olivia,55,-13,,/oxygen,quest to find leak
+,,Seismologist Misavo,67,105,,/temperature,quest for ice storage
+,,Gina Veramo,-217,33,,,PBS Nova staff
+,,Construction engineer Harlem,37,39,,/pressure,quest to check if airlock works
 NoMoon,Global,NA,,,,"/tides, /wind, /airflow",strongly hints to observe and compare /airflow and /wind
 ,Place,Greenhouse,-2,4,"(-1,14) (-9,14) (-9,9) (-5,9) (-5,7) (-1,7)","/wind, /airflow, /temperature, /humidity",
 ,,Turbine control,-95,50,"(-105,49) (-95,49) (-95,52) (-100,57) (-105,58)",,
-,,Wind Turbine,,,"(-136,107) (-142,107) (-142,123) (-136,123)",,
-,,Landed spaceship,,,"(-70,-23) (-55,-23) (-55,-8) (-70,-8)",,It's kind of a distraction because kids may be thinking to leave the level
-,,Ground water,,,"(-84,-58) (-77,-50)","/temperature, /humidity, /pressure, /composition","This is a pit below sea level, the settings picked up are just the ocean"
-,,Hot Spring,,,"(-254,-227)(-221,-225)","/temperature, /humidity, /pressure, /composition","region ID spring-lake-1, there are floating hints for it"
-,,Wind-stripped areas,,,"(-420,190)(420,480)(200,190)(440,-250)(440,-250)(-450-450)(-450,-260)(-280,190)",,
+,,Wind Turbine,-136,107,"(-136,107) (-142,107) (-142,123) (-136,123)",,
+,,Landed spaceship,-70,-23,"(-70,-23) (-55,-23) (-55,-8) (-70,-8)",,It's kind of a distraction because kids may be thinking to leave the level
+,,Ground water,-85,-50,"(-85,-50) (-77,-50) (-77,-57) (-85,-57)","/temperature, /humidity, /pressure, /composition","This is a pit below sea level, the settings picked up are just the ocean"
+,,Hot Spring,-254,-227,"(-254,-227) (-221,-227) (-221,-205) (-254,-205)","/temperature, /humidity, /pressure, /composition, /tides","region ID spring-lake-1, there are floating hints for it"
+,,Wind-stripped south,-420,190,"(-420,190) (420,190) (420,480) (-420,480)",,
+,,Wind-stripped east,200,190,"(200,190) (440,190) (440,-250) (200,-250)",,
+,,Wind-stripped north,440,-250,"(440,-250) (-450,-250) (-450,-450) (440,-450)",,
+,,Wind-stripped west,-450,-250,"(-450,-250) (-280,-250) (-280,190) (-450,190)",,
 ,NPCs,TravelAuthority,-2,1,,/observe,prompt to use /observe; visit botanist Tanya
 ,,Botanist,-1,12,,/wind,assign observation with wind quest
 ,,ElectricalEngineer,-101,52,,,
@@ -14,8 +29,8 @@ ColderStrip,Global,NA,,,,"/tides, /year, /temperature, /humidity, /wind",The bio
 ,Place,Bridge/Skyway,-89,-13,"(-89,-19) (268,-19) (268,-14) (-89,-14)",,"Speed boost in this area, could be a point of distraction"
 ,NPCs,Jorge the ArtistAstronomer,-151,4,,,assign quest to see each side
 ColderHot,Global,NA,,,,"/tides, /year, /wind, /rotational_period",
-,Place,Underground shelter,,,"(-68,-47) (-100,-90)","/temperature, /humidity, /radiation",
-,,SolarPanel,,,"(-103,-40) (-86,-50)",,
+,Place,Underground shelter,-68,-47,"(-68,-47) (-100,-90)","/temperature, /humidity, /radiation",
+,,SolarPanel,-103,-40,"(-103,-40) (-86,-50)",,
 ,NPCs,TeamLeader,-78,-55,,,explore and meet other NPCs
 ,,ElectricalEngineer,-100,-45,,,
 ,,Hydrologist,-93,-85,,,
@@ -91,8 +106,9 @@ TwoMoonsLluna,Global,NA,,,,"/tides, /daylength, /temperature",
 ,Place,View point of other moon,64,40,"(102,-68) (-38,-80)",,too wide to measure
 ,NPCs,InformationAgent,64,79,,,
 Trappist,Global,NA,,,,"/year, /cosmicrays",
-,Place,Pond 3,-3,119,"(-12,120) (0,127) (8,121) (8,124) (0,145) (-4,154) (-7,159) (-13,158) (-20,151) (-13,158)",/atmosphere,xz coordinate indicate the stadning point to see hints
-,NPCs,Chemist,-35,6,,/atmosphere,assign quest
+,Place,Pond 2,-3,119,"(-12,120) (0,127) (8,121) (8,124) (0,145) (-4,154) (-7,159) (-13,158) (-20,151) (-13,158)","/atmosphere, /composition",xz coordinate indicate the stadning point to see hints
+,,Pond 1,-138,-58,"(-152,-50) (-119,-50) (-119,-80) (-152,-80)","/atmosphere, /composition",
+,NPCs,Chemist,-35,6,,"/atmosphere, /composition",assign quest
 Gliese,Global,NA,,,,"/gravity, /atmosphere, /temperature, /pressure, /radius",
 ,NPCs,E.Mattson,5,40,,,
 ,,Prospector,0,51,,/temperature,assign quest
