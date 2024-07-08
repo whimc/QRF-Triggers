@@ -165,7 +165,7 @@ GET_CO_BLOCK_WITH_USERS = """
 SELECT b.*, u.user as username
 FROM co_block b
 LEFT JOIN co_user u ON b.user = u.rowid
-WHERE wid = 111 and b.time > (unix_timestamp(current_timestamp) - 120)
+WHERE wid = 111 and b.time > (unix_timestamp(current_timestamp) - 9900000)
 """
 
 # Extended GET_ONLINE_PLAYERS TO have current world data
@@ -333,6 +333,7 @@ class Fetcher:
         self.newer_than = initial_newer_than
         self.saveload_file = saveload_file
         # self.players = get_data(GET_ONLINE_PLAYERS)
+        self.block_triggers_df = pd.read_csv('BlockBasedTriggers.csv')
         
 
         # Mostly for type hinting
@@ -380,11 +381,11 @@ class Fetcher:
             df = get_data(query, self.newer_than)
             # Set 'self.<key>' to the new dataframe
             
-            '''
-            if key == "peek":
+            
+            if key == "co_block_with_users":
                 print ("PEEK")
                 print (df)
-            '''
+            
                 
             setattr(self, key, df)
 
@@ -549,7 +550,10 @@ class Fetcher:
         self.check_five_or_more_observations_in_world()
         self.check_five_or_more_tools_in_world()
         self.check_five_chat_messages_in_world()
-        self.check_over_200_actions_in_2_minutes()
+        # self.check_over_200_actions_in_2_minutes()
+        self.check_over_200_placed_actions_in_2_minutes()
+        self.check_over_200_destroyed_actions_in_2_minutes()
+        self.check_block_triggers()
         
         # print(f"TOOLS & OBSERVATION USAGE (SAVED): \n{self.tools_usage}\n")
 
@@ -1845,10 +1849,112 @@ class Fetcher:
                 self.triggers_list.append((trigger_message, user, 1))
                 print(trigger_message)
 
+    def check_over_200_placed_actions_in_2_minutes(self):
+        # Filter to include only place (1) actions and valid usernames
+        filtered_df = self.co_block_with_users[(self.co_block_with_users['action'] == 1) &
+                                               (~self.co_block_with_users['username'].str.startswith('#'))]
 
+        # Count the place actions per user
+        action_counts = filtered_df['username'].value_counts()
 
+        if not action_counts.empty:
+            print(f"\033[95m\nPLACE ACTION COUNTS:\033[0m\n{action_counts}\n")
 
+        # Trigger if place actions exceed 200 within 2 minutes
+        for user, count in action_counts.items():
+            if count > 200:
+                trigger_message = f"{user} has placed over 200 blocks in the last 2 minutes."
+                self.triggers_list.append((trigger_message, user, 1))
+                print(trigger_message)
 
+    def check_over_200_destroyed_actions_in_2_minutes(self):
+        # Filter to include only destroy (0) actions and valid usernames
+        filtered_df = self.co_block_with_users[(self.co_block_with_users['action'] == 0) &
+                                               (~self.co_block_with_users['username'].str.startswith('#'))]
+
+        # Count the destroy actions per user
+        action_counts = filtered_df['username'].value_counts()
+
+        if not action_counts.empty:
+            print(f"\033[95m\nDESTROY ACTION COUNTS:\033[0m\n{action_counts}\n")
+
+        # Trigger if destroy actions exceed 200 within 2 minutes
+        for user, count in action_counts.items():
+            if count > 200:
+                trigger_message = f"{user} has destroyed over 200 blocks in the last 2 minutes."
+                self.triggers_list.append((trigger_message, user, 1))
+                print(trigger_message)
+
+    def check_block_triggers(self):
+        current_time = datetime.now(pytz.timezone("America/Chicago")).timestamp()
+
+        for _, trigger_row in self.block_triggers_df.iterrows():
+            block_type = trigger_row['type']
+            material = trigger_row['material']
+            action = trigger_row['action']
+            time_window_high = trigger_row['Time_Window_High']
+            high_threshold = trigger_row['High_Threshold']
+            time_window_low = trigger_row['Time_Window_Low']
+            low_threshold = trigger_row['Low_Threshold']
+            priority = trigger_row['Priority']
+
+            # Filter the data for the specific block type and action
+            filtered_df = self.co_block_with_users[(self.co_block_with_users['type'] == block_type) &
+                                                   (self.co_block_with_users['action'] == action) &
+                                                   (~self.co_block_with_users['username'].str.startswith('#'))]
+
+            '''
+            # FOR CHECKING ignoring time window first
+            # Check for high threshold (ignoring time window)
+            if high_threshold != -1:
+                high_action_counts = filtered_df['username'].value_counts()
+
+                for user, count in high_action_counts.items():
+                    if count >= high_threshold:
+                        action_type = 'placed' if action == 1 else 'destroyed'
+                        trigger_message = f"{user} has {action_type} {count} {material} blocks (ignoring time window for testing)."
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(f"High trigger: {trigger_message}")
+
+            # Check for low threshold (ignoring time window)
+            if low_threshold != -1:
+                low_action_counts = filtered_df['username'].value_counts()
+
+                for user, count in low_action_counts.items():
+                    if count >= low_threshold:
+                        action_type = 'placed' if action == 1 else 'destroyed'
+                        trigger_message = f"{user} has {action_type} {count} {material} blocks (ignoring time window for testing)."
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(f"Low trigger: {trigger_message}")
+            '''
+            
+            # Check for high threshold within the high time window
+            if high_threshold != -1:
+                high_window_start = current_time - time_window_high
+                high_window_df = filtered_df[filtered_df['time'] >= high_window_start]
+                high_action_counts = high_window_df['username'].value_counts()
+
+                for user, count in high_action_counts.items():
+                    if count >= high_threshold:
+                        action_type = 'placed' if action == 1 else 'destroyed'
+                        trigger_message = f"{user} has {action_type} {count} {material} blocks in the last {time_window_high} seconds."
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(trigger_message)
+
+            # Check for low threshold within the low time window
+            if low_threshold != -1:
+                low_window_start = current_time - time_window_low
+                low_window_df = filtered_df[filtered_df['time'] >= low_window_start]
+                low_action_counts = low_window_df['username'].value_counts()
+
+                for user, count in low_action_counts.items():
+                    if count >= low_threshold:
+                        action_type = 'placed' if action == 1 else 'destroyed'
+                        trigger_message = f"{user} has {action_type} {count} {material} blocks in the last {time_window_low} seconds."
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(trigger_message)
+            
+            
 # =============================================================================
 # Driver Program (main)
 # =============================================================================
