@@ -165,7 +165,7 @@ GET_CO_BLOCK_WITH_USERS = """
 SELECT b.*, u.user as username
 FROM co_block b
 LEFT JOIN co_user u ON b.user = u.rowid
-WHERE wid = 111 and b.time > (unix_timestamp(current_timestamp) - 9900000)
+WHERE wid = 111 and b.time > (unix_timestamp(current_timestamp) - 120)
 """
 
 # Extended GET_ONLINE_PLAYERS TO have current world data
