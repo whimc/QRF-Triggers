@@ -233,6 +233,7 @@ from rg_region_cuboid where region_id = 'perimeter'
 -- though you could just assume that any region that's not perimeter on a mars build world is a kid base
 """
 
+'''
 GET_BLOCKS = """
 select user
       , world_id, x, y, z
@@ -243,6 +244,22 @@ from co_block where wid = 111 and
 where from_unixtime(time) >= '{newer_than}'
 -- timestamp is 10 digit unix precision
 """
+'''
+
+GET_BLOCKS = """
+select user
+      , world_id, x, y, z
+      , type
+      , action
+from co_block
+where wid = {wid} and
+from_unixtime(time) >= '{newer_than}'
+"""
+
+# Fetch the blocks with the provided wid (special function with special scope)
+def fetch_blocks(self):
+    query = GET_BLOCKS.format(wid=self.wid, newer_than=self.newer_than.strftime("%Y-%m-%d %H:%M:%S"))
+    self.co_block_with_users = get_data(query)
 
 GET_MATERIALS = """
 select id
@@ -250,10 +267,15 @@ select id
 from co_material_map
 """
 
+GET_WID_FOR_WORLD = """
+select w.rowid as wid
+from co_world w
+where w.world = 'sdp7'
+"""
+
 # =============================================================================
 # Utility Functions (get from WHIMC, send to Dispatcher)
 # =============================================================================
-
 
 def send_trigger(trigger_name: str, username: str, priority: int):
     payload = {
@@ -322,6 +344,7 @@ class Fetcher:
         "co_command": GET_CO_COMMAND,
         "co_command_with_worlds": GET_CO_COMMAND_WITH_WORLDS,
         "co_block_with_users": GET_CO_BLOCK_WITH_USERS,
+        "get_wid_for_world": GET_WID_FOR_WORLD,
     }
 
     def load_data(self):
@@ -329,10 +352,11 @@ class Fetcher:
             df = get_data(query, self.newer_than)
             setattr(self, key, df)
             
-    def __init__(self, initial_newer_than, saveload_file=None):
+    def __init__(self, initial_newer_than, saveload_file=None, wid=None):
         self.newer_than = initial_newer_than
         self.saveload_file = saveload_file
         # self.players = get_data(GET_ONLINE_PLAYERS)
+        self.wid = wid
         self.block_triggers_df = pd.read_csv('BlockBasedTriggers.csv')
         
 
@@ -348,6 +372,7 @@ class Fetcher:
         self.co_command_with_worlds = pd.DataFrame()
         self.co_chat_with_worlds = pd.DataFrame()
         self.co_block_with_users = pd.DataFrame()
+        self.get_wid_for_world = pd.DataFrame()
         
         self.load_data()
 
@@ -381,11 +406,16 @@ class Fetcher:
             df = get_data(query, self.newer_than)
             # Set 'self.<key>' to the new dataframe
             
-            
+            '''
             if key == "co_block_with_users":
                 print ("PEEK")
                 print (df)
-            
+                print ("WID")
+                print (self.wid)
+            '''
+            if key == "get_wid_for_world":
+                print ("PEEK")
+                print (df)
                 
             setattr(self, key, df)
 
@@ -1937,7 +1967,7 @@ class Fetcher:
                 for user, count in high_action_counts.items():
                     if count >= high_threshold:
                         action_type = 'placed' if action == 1 else 'destroyed'
-                        trigger_message = f"{user} has {action_type} {count} {material} blocks in the last {time_window_high} seconds."
+                        trigger_message = f"High Block Usage: {user} has {action_type} {count} {material} blocks in the last {time_window_low} seconds."
                         self.triggers_list.append((trigger_message, user, priority))
                         print(trigger_message)
 
@@ -1948,9 +1978,9 @@ class Fetcher:
                 low_action_counts = low_window_df['username'].value_counts()
 
                 for user, count in low_action_counts.items():
-                    if count >= low_threshold:
+                    if count <= low_threshold:
                         action_type = 'placed' if action == 1 else 'destroyed'
-                        trigger_message = f"{user} has {action_type} {count} {material} blocks in the last {time_window_low} seconds."
+                        trigger_message = f"Low Block Usage: {user} has {action_type} only {count} {material} blocks in the last {time_window_low} seconds."
                         self.triggers_list.append((trigger_message, user, priority))
                         print(trigger_message)
             
@@ -1994,6 +2024,14 @@ if __name__ == "__main__":
         type=str,
         default=None,
     )
+    
+    # add wid to argument parser
+    parser.add_argument(
+    "--wid",
+    help="Specify the world ID (wid)",
+    type=int,
+    required=True
+    )
 
     args = parser.parse_args()
 
@@ -2004,7 +2042,7 @@ if __name__ == "__main__":
     # print("Connected!")
 
     central_tz = pytz.timezone("America/Chicago")
-    fetcher = Fetcher(args.initial_newer_than, args.saveload)
+    fetcher = Fetcher(args.initial_newer_than, args.saveload, args.wid)
 
     # Start a new thread for updating positions every 3 seconds
     position_thread = threading.Thread(target=fetcher.update_positions_every_3_seconds)
@@ -2018,7 +2056,7 @@ if __name__ == "__main__":
         
         current_time = datetime.now().timestamp()
         if (
-            current_time - fetcher.last_trigger_time > 34
+            current_time - fetcher.last_trigger_time > 300
             # current_time - fetcher.last_trigger_time > 9999999 #turn off random trigger during testing
         ):  # Check if 34 seconds have passed
             if not fetcher.triggers_list:  # Check if no trigger has been sent recently
