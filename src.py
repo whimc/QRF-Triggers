@@ -165,7 +165,7 @@ GET_CO_BLOCK_WITH_USERS = """
 SELECT b.*, u.user as username
 FROM co_block b
 LEFT JOIN co_user u ON b.user = u.rowid
-WHERE wid = 111 and b.time > (unix_timestamp(current_timestamp) - 120)
+WHERE wid = 118 and b.time > (unix_timestamp(current_timestamp) - 120)
 """
 
 # Extended GET_ONLINE_PLAYERS TO have current world data
@@ -239,7 +239,7 @@ select user
       , world_id, x, y, z
       , type
       , action
-from co_block where wid = 111 and
+from co_block where wid = 118 and
 -- this should be a variable defined at startup, not hardcoded; wid 111 = sdp7
 where from_unixtime(time) >= '{newer_than}'
 -- timestamp is 10 digit unix precision
