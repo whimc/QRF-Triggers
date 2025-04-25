@@ -165,7 +165,7 @@ GET_CO_BLOCK_WITH_USERS = """
 SELECT b.*, u.user as username
 FROM co_block b
 LEFT JOIN co_user u ON b.user = u.rowid
-WHERE wid = 111 and b.time > (unix_timestamp(current_timestamp) - 120)
+WHERE wid = 118 and b.time > (unix_timestamp(current_timestamp) - 120)
 """
 
 # Extended GET_ONLINE_PLAYERS TO have current world data
@@ -239,7 +239,7 @@ select user
       , world_id, x, y, z
       , type
       , action
-from co_block where wid = 111 and
+from co_block where wid = 118 and
 -- this should be a variable defined at startup, not hardcoded; wid 111 = sdp7
 where from_unixtime(time) >= '{newer_than}'
 -- timestamp is 10 digit unix precision
@@ -373,6 +373,9 @@ class Fetcher:
         self.co_chat_with_worlds = pd.DataFrame()
         self.co_block_with_users = pd.DataFrame()
         self.get_wid_for_world = pd.DataFrame()
+        
+        # Luc added
+        self.prev_trig_time = pd.DataFrame(columns=['User', 'Material', 'Action', 'H_or_l', 'Time'])
         
         self.load_data()
 
@@ -1961,28 +1964,91 @@ class Fetcher:
             # Check for high threshold within the high time window
             if high_threshold != -1:
                 high_window_start = current_time - time_window_high
-                high_window_df = filtered_df[filtered_df['time'] >= high_window_start]
+
+                # Luc added                
+                trigger_times = self.prev_trig_time.loc[self.prev_trig_time['Material'] == material]
+                trigger_times = trigger_times.loc[trigger_times['Action'] == action]
+                trigger_times = trigger_times.loc[trigger_times['H_or_l'] == "high"]
+                
+                # Luc modified
+                
+                #high_window_df = filtered_df[filtered_df['time'] >= high_window_start]
+                
+                # Luc - I tried to make this work without a loop, but couldn't make it work. Could probably be made more efficient
+                rows_to_drop = []
+                for _, row in filtered_df.iterrows():
+                    # (trigger_times.empty) or not (trigger_times.loc[trigger_times['User'] == filtered_df['username']].empty) else trigger_times.loc[trigger_times['User'] == filtered_df['username']]["Time"]
+                    window_start_time = high_window_start
+                    if (not trigger_times.empty and (not trigger_times.loc[trigger_times['User'] == row['username']].empty)):
+                        selected_row = trigger_times.loc[trigger_times['User'] == row['username']]
+                        print (selected_row)
+                        selected_row_index = selected_row.index.values.astype(int)[0]
+                        window_start_time = max(window_start_time, selected_row.loc[selected_row_index]['Time'])
+                    
+                    # print(f"Original threshold: {high_window_start},    New threshold: {window_start_time}")
+                    
+                    if row['time'] < window_start_time:
+                        rows_to_drop.append(row['rowid'])
+                    
+                #high_window_df = filtered_df[filtered_df['rowid'] > 0]
+                
+                #print(f"Rows to drop: {rows_to_drop}")
+                #print(f"Before filtering:\n{filtered_df}")
+                
+                high_window_df = filtered_df[~filtered_df['rowid'].isin(rows_to_drop)]
+                
+                #print (f"After filtering:\n{high_window_df}")
+                
                 high_action_counts = high_window_df['username'].value_counts()
 
                 for user, count in high_action_counts.items():
                     if count >= high_threshold:
                         action_type = 'placed' if action == 1 else 'destroyed'
-                        trigger_message = f"High Block Usage: {user} has {action_type} {count} {material} blocks in the last {time_window_low} seconds."
+                        trigger_message = f"High Block Usage: {user} has {action_type} {count} {material} blocks in the last {time_window_high} seconds."
                         self.triggers_list.append((trigger_message, user, priority))
+                        
+                        # Luc need to fix this
+                        # if the row exists drop it (or replace one value in it)
+                        # othersiwe concat (if modified)
+                        # If dropped, always do the concat
+                        
+                        # Luc - not sure why but I wasn't able to select on multiple columns at the same time. Could probably be made more efficient
+                        previous_row = self.prev_trig_time.loc[self.prev_trig_time['Material'] == material]
+                        previous_row = previous_row.loc[previous_row['Action'] == action]
+                        previous_row = previous_row.loc[previous_row['H_or_l'] == "high"]
+                        previous_row = previous_row.loc[previous_row['User'] == user]
+                        
+                        print (f"Before: {self.prev_trig_time}")
+                        
+                        if not previous_row.empty:
+                            print ("***************** row exists ************")
+                            index = self.prev_trig_time[(self.prev_trig_time['Material'] == material) & (self.prev_trig_time['Action'] == action) & (self.prev_trig_time['H_or_l'] == "high") & (self.prev_trig_time['User'] == user)].index.values.astype(int)[0]
+                            print (f"Index: {index}")
+                            self.prev_trig_time = self.prev_trig_time.drop(index)
+                            #previous_row['Time'] = current_time
+                            #self.prev_trig_time = self.prev_trig_time[self.prev_trig_time['Material'] != material, self.prev_trig_time['Action'] != action, self.prev_trig_time['H_or_l'] != "high", self.prev_trig_time['User'] == user]
+                        
+                        print ("**************** concat ****************")
+                        self.prev_trig_time = pd.concat([self.prev_trig_time, pd.DataFrame.from_records([{'User': user, 'Material': material, "Action": action, "H_or_l": "high", "Time": current_time}])], ignore_index = True)
+                        
+                        print (f"After: {self.prev_trig_time}")
+                        
                         print(trigger_message)
 
             # Check for low threshold within the low time window
-            if low_threshold != -1:
-                low_window_start = current_time - time_window_low
-                low_window_df = filtered_df[filtered_df['time'] >= low_window_start]
-                low_action_counts = low_window_df['username'].value_counts()
+            #if low_threshold != -1:
+            #    low_window_start = current_time - time_window_low
+                
+            #    low_window_df = filtered_df[filtered_df['time'] >= low_window_start]
+            #    low_action_counts = low_window_df['username'].value_counts()
 
-                for user, count in low_action_counts.items():
-                    if count <= low_threshold:
-                        action_type = 'placed' if action == 1 else 'destroyed'
-                        trigger_message = f"Low Block Usage: {user} has {action_type} only {count} {material} blocks in the last {time_window_low} seconds."
-                        self.triggers_list.append((trigger_message, user, priority))
-                        print(trigger_message)
+            #    for user, count in low_action_counts.items():
+            #        if count <= low_threshold:
+            #            action_type = 'placed' if action == 1 else 'destroyed'
+            #            trigger_message = f"Low Block Usage: {user} has {action_type} only {count} {material} blocks in the last {time_window_low} seconds."
+            #            self.triggers_list.append((trigger_message, user, priority))
+            #            
+            #            print(trigger_message)
             
             
 # =============================================================================
