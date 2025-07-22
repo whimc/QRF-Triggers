@@ -444,11 +444,23 @@ class Fetcher:
     }
 
 
-    def load_data(self):
-        for key, query in Fetcher.CMDS.items():
-            df = get_data(query, {"time": self.newer_than})
-            setattr(self, key, df)
-   
+def load_data(self):
+    for key, query in Fetcher.CMDS.items():
+        # Build dynamic params for each query
+        params = {}
+        if ":time" in query or "%(time)" in query:
+            params["time"] = self.newer_than
+        if ":global_wids" in query or "%(global_wids)" in query:
+            params["global_wids"] = GLOBAL_WID
+
+        df = get_data(query, params)
+
+        setattr(self, key, df)
+
+        # Optional debug
+        if key == "get_wid_for_world":
+            print(f"[DEBUG] get_wid_for_world result:")
+            print(df)
             
     def __init__(self, initial_newer_than, saveload_file=None, wid=None):
         self.newer_than = initial_newer_than
