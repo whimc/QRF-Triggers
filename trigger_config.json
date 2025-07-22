@@ -1,9 +1,10 @@
 {
     "check_in_pause_box": {
-	  "enabled": true,
-	  "priority": 2,
-	  "category": "Actions A7"
-	},"check_block_triggers": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Actions A7"
+    },
+    "check_block_triggers": {
         "enabled": true,
         "priority": 1,
         "category": "Block B3"
@@ -29,7 +30,7 @@
         "category": "Tools T5"
     },
     "check_avoiding_poi": {
-        "enabled": true,
+        "enabled": false,
         "priority": 2,
         "category": "Movement/POI M10"
     },
