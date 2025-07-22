@@ -355,22 +355,9 @@ WHERE w.rowid IN :global_wids
 """
 '''
 
-#Replacing method to get world ID's
-#dynamically build the query string with the correct number of %s placeholders
-def build_get_wid_for_world_query(wid_list):
-    placeholders = ','.join(['%s'] * len(wid_list))
-    return f"""
-    SELECT w.rowid AS wid
-    FROM co_world w
-    WHERE w.rowid IN ({placeholders})
-    """
-
-block_trigger_cooldowns = {}  # maps username -> last_trigger_time
-block_trigger_cooldown_seconds = 100000
-
-# ==========
+# =========================
 # Updating from static WID
-# ==========
+# =========================
 
 def make_get_wid_query(wids):
     if not wids:
@@ -382,6 +369,9 @@ def make_get_wid_query(wids):
     WHERE w.rowid IN ({placeholders})
     """
     return query, tuple(wids)
+
+block_trigger_cooldowns = {}  # maps username -> last_trigger_time
+block_trigger_cooldown_seconds = 100000
 
 # =============================================================================
 # Utility Functions (get from WHIMC, send to Dispatcher)
@@ -460,7 +450,7 @@ class Fetcher:
         "co_command": GET_CO_COMMAND,
         "co_command_with_worlds": GET_CO_COMMAND_WITH_WORLDS,
         "co_block_with_users": GET_CO_BLOCK_WITH_USERS, # will dynamically load for the world set in --wid in command line startup
-        "get_wid_for_world": build_get_wid_for_world_query,
+        "get_wid_for_world": GET_WID_FOR_WORLD,
         "get_tables": GET_TABLES,
         "get_deaths": GET_DEATHS,
         "get_co_blocks": GET_CO_BLOCKS,
