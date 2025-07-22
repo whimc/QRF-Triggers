@@ -348,10 +348,10 @@ select id
 from co_material_map
 """
 
-GET_WID_FOR_WORLD = f"""
+GET_WID_FOR_WORLD = """
 SELECT w.rowid AS wid
 FROM co_world w
-WHERE w.rowid IN ({', '.join(str(wid) for wid in GLOBAL_WID)})
+WHERE w.rowid IN :global_wids
 """
 
 
@@ -409,8 +409,13 @@ def send_trigger(trigger_name: str, username: str, priority: int):
         print(f"An error occurred: {e}")
 
 
-def get_data(query, newer_than: datetime | None = None) -> pd.DataFrame:
-    return pd.read_sql(query.format(newer_than=newer_than), ENG)
+from sqlalchemy import text
+
+def get_data(query, params=None):
+    if isinstance(query, str):
+        return pd.read_sql(text(query), ENG, params=params)
+    else:
+        return query  # fallback, if query is already a DataFrame
 
 
 # =============================================================================
@@ -548,23 +553,27 @@ class Fetcher:
 
 
 
-    def fetch_data(self):
-        for key, query in Fetcher.CMDS.items():
-            if key == "get_wid_for_world":
-                df = get_data(query, {"global_wids": GLOBAL_WID})  # ✅ Pass list directly
-            else:
-                df = get_data(query, {"time": self.newer_than})    # Your usual param
+def fetch_data(self):
+    for key, query in Fetcher.CMDS.items():
+        if key == "get_wid_for_world":
+            df = get_data(query, {"global_wids": tuple(GLOBAL_WID)})
+        elif "{time}" in query:
+            df = get_data(query, {"time": self.newer_than})
+        else:
+            df = get_data(query)
 
-            if key == "co_block_with_users":
-                print("PEEK")
-                print(df)
-                print("WID set on self")
-                print(self.wid)
+        setattr(self, key, df)
 
-            if key == "get_wid_for_world":
-                print(f"PEEK: {key}")
-                print(df)
-                print("WID or current world")
+        if key == "co_block_with_users":
+            print("PEEK")
+            print(df)
+            print("WID set on self")
+            print(self.wid)
+
+        if key == "get_wid_for_world":
+            print(f"PEEK: {key}")
+            print(df)
+            print("WID or current world")
              
             setattr(self, key, df)
 
