@@ -550,20 +550,19 @@ class Fetcher:
                 f"\033[92mProgress saved to '{self.saveload_file}'.\nIt is now safe to stop the Python script.\033[0m\n"
             )
 
-
-
-
 def fetch_data(self):
     for key, query in Fetcher.CMDS.items():
         if key == "get_wid_for_world":
-            df = get_data(query, {"global_wids": tuple(GLOBAL_WID)})
-        elif "{time}" in query:
-            df = get_data(query, {"time": self.newer_than})
+            # Special case: query needs 'global_wids' param
+            df = get_data(query, {"global_wids": GLOBAL_WID})
         else:
-            df = get_data(query)
+            # Default case: only 'time' param
+            df = get_data(query, {"time": self.newer_than})
 
+        # Set 'self.<key>' to the new dataframe (optional: setattr)
         setattr(self, key, df)
 
+        # Optional debugging
         if key == "co_block_with_users":
             print("PEEK")
             print(df)
