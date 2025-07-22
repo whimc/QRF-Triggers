@@ -1,4 +1,4 @@
-GLOBAL_WID = [127, 131, 145]
+GLOBAL_WID = [127, 132, 145]
 
 # =============================================================================
 # Imports
@@ -502,6 +502,7 @@ class Fetcher:
             )
     '''
     
+    '''
     def save_tools_usage(self):
         # Deep copy to avoid mutating the live structure
         from copy import deepcopy
@@ -514,6 +515,27 @@ class Fetcher:
 
         with open("tools_usage.json", "w") as f:
             json.dump(serializable_tools_usage, f, indent=2)
+    '''
+    
+    def save_tools_usage(self):
+        from copy import deepcopy
+
+        if self.saveload_file:
+            # Deep copy to avoid mutating the live structure
+            serializable_tools_usage = deepcopy(self.tools_usage)
+
+            for username, user_data in serializable_tools_usage.items():
+                if "explored_worlds" in user_data and isinstance(user_data["explored_worlds"], set):
+                    user_data["explored_worlds"] = list(user_data["explored_worlds"])
+
+            with open(self.saveload_file, "w") as f:
+                json.dump(serializable_tools_usage, f, indent=2)
+
+            print(
+                f"\033[92mProgress saved to '{self.saveload_file}'.\nIt is now safe to stop the Python script.\033[0m\n"
+            )
+
+
 
 
     def fetch_data(self):
@@ -737,6 +759,7 @@ class Fetcher:
         self.check_prolonged_stop_in_region()
         self.check_possible_afk_behavior()
         self.check_movement_toward_npc_or_poi()
+        self.check_in_pause_box()
         
         # print(f"TOOLS & OBSERVATION USAGE (SAVED): \n{self.tools_usage}\n")
 
@@ -2814,7 +2837,7 @@ class Fetcher:
                     message = row["message"]
                     for tool in multi_use_tools + single_use_tools:
                         if f"/{tool}" in message:
-                            self.tools_usage[user]["tool_use_count"] = self.tools_usage[user].get("tool_use_count", 0) + 1
+                            self.tools_usage[user]["tool_use_count"] += 1
                             tool_key = f"{tool}_{current_world}"
                             self.tools_usage[user].setdefault(tool_key, 0)
                             self.tools_usage[user][tool_key] += 1
@@ -3819,6 +3842,25 @@ class Fetcher:
                     self.triggers_list.append((msg, current["username"], priority))
                     print(msg)
                     break  # only need the first match
+
+
+    def check_in_pause_box(self):
+        trigger_name = "check_in_pause_box"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        for _, row in self.players.iterrows():
+            username = row["online_user"]
+            world = row["world"]
+
+            if world == "Hub":
+                msg = f"{username} is currently in the pause box (world = Hub). Category: {category}"
+                self.triggers_list.append((msg, username, priority))
+                print(msg)
+
 
 
     def check_tool_inspiration_generic(self):
