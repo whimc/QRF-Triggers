@@ -348,10 +348,10 @@ select id
 from co_material_map
 """
 
-GET_WID_FOR_WORLD = """
+GET_WID_FOR_WORLD = f"""
 SELECT w.rowid AS wid
 FROM co_world w
-WHERE w.rowid IN :global_wids
+WHERE w.rowid IN ({', '.join(str(wid) for wid in GLOBAL_WID)})
 """
 
 
