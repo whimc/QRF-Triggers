@@ -5176,82 +5176,82 @@ if __name__ == "__main__":
 #debug
 print("Fetcher type at runtime:", type(Fetcher))
 
-    central_tz = pytz.timezone("America/Chicago")
-    fetcher = Fetcher(args.initial_newer_than, args.saveload, args.wid)
-    print(f"\033[93mCONFIG → World ID set to: {args.wid}\033[0m")
+central_tz = pytz.timezone("America/Chicago")
+fetcher = Fetcher(args.initial_newer_than, args.saveload, args.wid)
+print(f"\033[93mCONFIG → World ID set to: {args.wid}\033[0m")
     
-    # Start Trigger Manager GUI in a separate thread
-    gui_thread = threading.Thread(target=launch_trigger_manager)
-    gui_thread.daemon = True
-    gui_thread.start()
+# Start Trigger Manager GUI in a separate thread
+gui_thread = threading.Thread(target=launch_trigger_manager)
+gui_thread.daemon = True
+gui_thread.start()
 
-    # Start a new thread for updating positions every 3 seconds
-    position_thread = threading.Thread(target=fetcher.update_positions_every_3_seconds)
-    position_thread.daemon = True  # This makes sure the thread will exit when the main program exits
-    position_thread.start()
+# Start a new thread for updating positions every 3 seconds
+position_thread = threading.Thread(target=fetcher.update_positions_every_3_seconds)
+position_thread.daemon = True  # This makes sure the thread will exit when the main program exits
+position_thread.start()
 
-    '''
-    while True:
-        fetcher.on_wakeup()
-        
-        print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
-        
-        current_time = datetime.now().timestamp()
-        if (
-            current_time - fetcher.last_trigger_time > 300
-            # current_time - fetcher.last_trigger_time > 9999999 #turn off random trigger during testing
-        ):  # Check if 34 seconds have passed
-            if not fetcher.triggers_list:  # Check if no trigger has been sent recently
+'''
+while True:
+    fetcher.on_wakeup()
+    
+    print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
+    
+    current_time = datetime.now().timestamp()
+    if (
+        current_time - fetcher.last_trigger_time > 300
+        # current_time - fetcher.last_trigger_time > 9999999 #turn off random trigger during testing
+    ):  # Check if 34 seconds have passed
+        if not fetcher.triggers_list:  # Check if no trigger has been sent recently
+            online_students = fetcher.players["online_user"].tolist()
+            if online_students:
+                random_student = random.choice(online_students)
+                trigger_message = "Random check-in"
+                print(
+                    f"\033[92m \nSending random trigger to '{random_student}' on next wakeup. \033[0m"
+                )
+                fetcher.triggers_list.append((trigger_message, random_student, 10))
+                fetcher.last_trigger_time = (
+                    current_time  # Update the last trigger time
+                )
+    fetcher.save_tools_usage()
+    
+    
+    now = datetime.now(central_tz)
+    
+    print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
+    sleep(10)  # run checks every 10 seconds
+'''
+    
+while True:
+    fetcher.on_wakeup()
+
+    print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
+
+    current_time = datetime.now().timestamp()
+
+    # === Trigger Settings ===
+    random_trigger_name = "check_random_checkin"
+    random_enabled, random_priority, category = get_trigger_settings(random_trigger_name)
+
+    if (
+        current_time - fetcher.last_trigger_time > 300  # 5 minutes
+    ):
+        if not fetcher.triggers_list:  # Only send if no other triggers are pending
+            if random_enabled:
                 online_students = fetcher.players["online_user"].tolist()
                 if online_students:
                     random_student = random.choice(online_students)
-                    trigger_message = "Random check-in"
+                    trigger_message = f"Random check-in. Category: {category}"
                     print(
                         f"\033[92m \nSending random trigger to '{random_student}' on next wakeup. \033[0m"
                     )
-                    fetcher.triggers_list.append((trigger_message, random_student, 10))
-                    fetcher.last_trigger_time = (
-                        current_time  # Update the last trigger time
-                    )
-        fetcher.save_tools_usage()
-        
-        
-        now = datetime.now(central_tz)
-        
-        print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
-        sleep(10)  # run checks every 10 seconds
-    '''
-    
-    while True:
-        fetcher.on_wakeup()
-        
-        print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
-        
-        current_time = datetime.now().timestamp()
+                    fetcher.triggers_list.append((trigger_message, random_student, random_priority))
+                    fetcher.last_trigger_time = current_time
+            else:
+                print(f"\033[90mSkipping {random_trigger_name} (priority {random_priority}) — disabled in Trigger Manager.\033[0m")
 
-        # === Trigger Settings ===
-        random_trigger_name = "check_random_checkin"
-        random_enabled, random_priority, category = get_trigger_settings(random_trigger_name)
+    fetcher.save_tools_usage()
 
-        if (
-            current_time - fetcher.last_trigger_time > 300  # 5 minutes
-        ):
-            if not fetcher.triggers_list:  # Only send if no other triggers are pending
-                if random_enabled:
-                    online_students = fetcher.players["online_user"].tolist()
-                    if online_students:
-                        random_student = random.choice(online_students)
-                        trigger_message = f"Random check-in. Category: {category}"
-                        print(
-                            f"\033[92m \nSending random trigger to '{random_student}' on next wakeup. \033[0m"
-                        )
-                        fetcher.triggers_list.append((trigger_message, random_student, random_priority))
-                        fetcher.last_trigger_time = current_time
-                else:
-                    print(f"\033[90mSkipping {random_trigger_name} (priority {random_priority}) — disabled in Trigger Manager.\033[0m")
-
-        fetcher.save_tools_usage()
-
-        now = datetime.now(central_tz)
-        print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
-        sleep(10)
+    now = datetime.now(central_tz)
+    print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
+    sleep(10)
