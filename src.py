@@ -450,7 +450,7 @@ class Fetcher:
         "co_command": GET_CO_COMMAND,
         "co_command_with_worlds": GET_CO_COMMAND_WITH_WORLDS,
         "co_block_with_users": GET_CO_BLOCK_WITH_USERS, # will dynamically load for the world set in --wid in command line startup
-        "get_wid_for_world": GET_WID_FOR_WORLD,
+        "get_wid_for_world": make_get_wid_query,
         "get_tables": GET_TABLES,
         "get_deaths": GET_DEATHS,
         "get_co_blocks": GET_CO_BLOCKS,
