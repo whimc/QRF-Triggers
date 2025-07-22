@@ -347,13 +347,23 @@ select id
       , material
 from co_material_map
 """
-
+'''
 GET_WID_FOR_WORLD = """
 SELECT w.rowid AS wid
 FROM co_world w
 WHERE w.rowid IN :global_wids
 """
+'''
 
+#Replacing method to get world ID's
+#dynamically build the query string with the correct number of %s placeholders
+def build_get_wid_for_world_query(wid_list):
+    placeholders = ','.join(['%s'] * len(wid_list))
+    return f"""
+    SELECT w.rowid AS wid
+    FROM co_world w
+    WHERE w.rowid IN ({placeholders})
+    """
 
 block_trigger_cooldowns = {}  # maps username -> last_trigger_time
 block_trigger_cooldown_seconds = 100000
