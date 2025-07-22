@@ -528,7 +528,7 @@ class Fetcher:
         else:
             self.tools_usage = {}
 
-        self.initialize_tool_usage()
+        #self.initialize_tool_usage()
         self.observations_record = {}
         self.pair_durations = defaultdict(int)
         
