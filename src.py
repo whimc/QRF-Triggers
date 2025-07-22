@@ -444,23 +444,23 @@ class Fetcher:
     }
 
 
-def load_data(self):
-    for key, query in Fetcher.CMDS.items():
-        # Build dynamic params for each query
-        params = {}
-        if ":time" in query or "%(time)" in query:
-            params["time"] = self.newer_than
-        if ":global_wids" in query or "%(global_wids)" in query:
-            params["global_wids"] = GLOBAL_WID
+    def load_data(self):
+        for key, query in Fetcher.CMDS.items():
+            # Build dynamic params for each query
+            params = {}
+            if ":time" in query or "%(time)" in query:
+                params["time"] = self.newer_than
+            if ":global_wids" in query or "%(global_wids)" in query:
+                params["global_wids"] = GLOBAL_WID
 
-        df = get_data(query, params)
+            df = get_data(query, params)
 
-        setattr(self, key, df)
+            setattr(self, key, df)
 
-        # Optional debug
-        if key == "get_wid_for_world":
-            print(f"[DEBUG] get_wid_for_world result:")
-            print(df)
+            # Optional debug
+            if key == "get_wid_for_world":
+                print(f"[DEBUG] get_wid_for_world result:")
+                print(df)
             
     def __init__(self, initial_newer_than, saveload_file=None, wid=None):
         self.newer_than = initial_newer_than
@@ -5172,6 +5172,9 @@ if __name__ == "__main__":
     #     "wss://free.blr2.piesocket.com/v3/qrfchannel?api_key=4TRTtRRXmvNwXCWUFIjgKLDdZJ0zwoKpzn5ydd7Y&notify_self=1"
     # )
     # print("Connected!")
+
+#debug
+print("Fetcher type at runtime:", type(Fetcher))
 
     central_tz = pytz.timezone("America/Chicago")
     fetcher = Fetcher(args.initial_newer_than, args.saveload, args.wid)
