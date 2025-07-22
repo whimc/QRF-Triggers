@@ -446,7 +446,7 @@ class Fetcher:
 
     def load_data(self):
         for key, query in Fetcher.CMDS.items():
-            df = get_data(query, self.newer_than)
+            df = get_data(query, {"time": self.newer_than})
             setattr(self, key, df)
    
             
