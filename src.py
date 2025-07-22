@@ -461,25 +461,26 @@ class Fetcher:
 
     def load_data(self):
         for key, query in Fetcher.CMDS.items():
-            # Build dynamic params for each query
-            params = {}
-            if ":time" in query or "%(time)" in query:
-                params["time"] = self.newer_than
-            if ":global_wids" in query or "%(global_wids)" in query:
-                params["global_wids"] = GLOBAL_WID
-
             if key == "get_wid_for_world":
-                query, query_params = make_get_wid_query(GLOBAL_WID)
-                df = pd.read_sql(query, ENG, params=query_params)
-            else:
-                df = get_data(query, params)
-
-            setattr(self, key, df)
-
-            # Optional debug
-            if key == "get_wid_for_world":
+                # Special case: function that returns (query_string, tuple_params)
+                query_str, query_params = query(GLOBAL_WID)
+                df = pd.read_sql(query_str, ENG, params=query_params)
                 print(f"[DEBUG] get_wid_for_world result:")
                 print(df)
+            else:
+                # Handle typical SQL strings with optional params
+                params = {}
+                if isinstance(query, str):
+                    if ":time" in query or "%(time)" in query:
+                        params["time"] = self.newer_than
+                    if ":global_wids" in query or "%(global_wids)" in query:
+                        params["global_wids"] = GLOBAL_WID
+
+                    df = get_data(query, params)
+                else:
+                    raise TypeError(f"Unexpected type for query '{key}': {type(query)}")
+
+            setattr(self, key, df)
             
     def __init__(self, initial_newer_than, saveload_file=None, wid=None):
         self.newer_than = initial_newer_than
@@ -584,16 +585,15 @@ class Fetcher:
     def fetch_data(self):
         for key, query in Fetcher.CMDS.items():
             if key == "get_wid_for_world":
-                # Special case: query needs 'global_wids' param
-                df = get_data(query, {"global_wids": GLOBAL_WID})
+                query_str, query_params = query(GLOBAL_WID)
+                df = pd.read_sql(query_str, ENG, params=query_params)
             else:
-                # Default case: only 'time' param
-                df = get_data(query, {"time": self.newer_than})
+                df = pd.read_sql(text(query), ENG, params={"time": self.newer_than})
 
             # Set 'self.<key>' to the new dataframe (optional: setattr)
             setattr(self, key, df)
 
-            # Optional debugging
+            # debugging
             if key == "co_block_with_users":
                 print("PEEK")
                 print(df)
