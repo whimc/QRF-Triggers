@@ -357,7 +357,22 @@ WHERE w.rowid IN :global_wids
 
 block_trigger_cooldowns = {}  # maps username -> last_trigger_time
 block_trigger_cooldown_seconds = 100000
-        
+
+# ==========
+# Updating from static WID
+# ==========
+
+def make_get_wid_query(wids):
+    if not wids:
+        raise ValueError("GLOBAL_WID list is empty.")
+    placeholders = ", ".join(["%s"] * len(wids))
+    query = f"""
+    SELECT w.rowid AS wid
+    FROM co_world w
+    WHERE w.rowid IN ({placeholders})
+    """
+    return query, tuple(wids)
+
 # =============================================================================
 # Utility Functions (get from WHIMC, send to Dispatcher)
 # =============================================================================
@@ -453,7 +468,11 @@ class Fetcher:
             if ":global_wids" in query or "%(global_wids)" in query:
                 params["global_wids"] = GLOBAL_WID
 
-            df = get_data(query, params)
+            if key == "get_wid_for_world":
+                query, query_params = make_get_wid_query(GLOBAL_WID)
+                df = pd.read_sql(query, ENG, params=query_params)
+            else:
+                df = get_data(query, params)
 
             setattr(self, key, df)
 
