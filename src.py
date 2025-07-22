@@ -581,33 +581,33 @@ class Fetcher:
                 f"\033[92mProgress saved to '{self.saveload_file}'.\nIt is now safe to stop the Python script.\033[0m\n"
             )
 
-def fetch_data(self):
-    for key, query in Fetcher.CMDS.items():
-        if key == "get_wid_for_world":
-            # Special case: query needs 'global_wids' param
-            df = get_data(query, {"global_wids": GLOBAL_WID})
-        else:
-            # Default case: only 'time' param
-            df = get_data(query, {"time": self.newer_than})
+    def fetch_data(self):
+        for key, query in Fetcher.CMDS.items():
+            if key == "get_wid_for_world":
+                # Special case: query needs 'global_wids' param
+                df = get_data(query, {"global_wids": GLOBAL_WID})
+            else:
+                # Default case: only 'time' param
+                df = get_data(query, {"time": self.newer_than})
 
-        # Set 'self.<key>' to the new dataframe (optional: setattr)
-        setattr(self, key, df)
-
-        # Optional debugging
-        if key == "co_block_with_users":
-            print("PEEK")
-            print(df)
-            print("WID set on self")
-            print(self.wid)
-
-        if key == "get_wid_for_world":
-            print(f"PEEK: {key}")
-            print(df)
-            print("WID or current world")
-             
+            # Set 'self.<key>' to the new dataframe (optional: setattr)
             setattr(self, key, df)
 
-        self.save_tools_usage()  # save after fetching the data
+            # Optional debugging
+            if key == "co_block_with_users":
+                print("PEEK")
+                print(df)
+                print("WID set on self")
+                print(self.wid)
+
+            if key == "get_wid_for_world":
+                print(f"PEEK: {key}")
+                print(df)
+                print("WID or current world")
+
+                setattr(self, key, df)
+
+            self.save_tools_usage()  # save after fetching the data
         
     def fetch_data_playersonly(self):
         for key, query in Fetcher.CMDS.items():
@@ -1207,8 +1207,6 @@ def fetch_data(self):
                     self.tools_usage[user].pop("m7_distance", None)
                     self.tools_usage[user].pop("m7_world", None)
                     self.tools_usage[user].pop("m7_object", None)
-
-
 
 
     def check_appropriate_tool_use_near_poi(self):
