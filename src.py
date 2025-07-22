@@ -1,4 +1,14 @@
-GLOBAL_WID = [127, 132, 145]
+# Based on 22 July 2025 version from Neithan
+# modified by Geph for AIED demo 24 July 2025
+
+#127 = SDP12 junior high at Fiske - ideal for demos
+#129 = uncc25am beginners at UNCC
+#130 = uncc25pm returners at UNCC
+#131 = SDP13 grades 4-6 at Fiske
+#133 = Umaine25am
+#134 = Umaine25pm
+
+GLOBAL_WID = [127, 133, 134, 145]
 
 # =============================================================================
 # Imports
@@ -174,7 +184,7 @@ LIMIT 20;
 GET_DEATHS = """
 SELECT uuid, username, world, x, y, z, time, type
 FROM whimc_action_physical
-WHERE type = 'DEATH';
+WHERE type LIKE 'DEATH%';
 """
 
 
@@ -339,9 +349,9 @@ from co_material_map
 """
 
 GET_WID_FOR_WORLD = """
-select w.rowid as wid
-from co_world w
-where w.world = 'sdp12'
+SELECT w.rowid AS wid
+FROM co_world w
+WHERE w.rowid IN :global_wids
 """
 
 
@@ -540,23 +550,21 @@ class Fetcher:
 
     def fetch_data(self):
         for key, query in Fetcher.CMDS.items():
-            df = get_data(query, self.newer_than)
-            # Set 'self.<key>' to the new dataframe
-            
-            
-            if key == "co_block_with_users":
-                print ("PEEK")
-                print (df)
-                print ("WID set on self")
-                print (self.wid)
-            
-            
-            
             if key == "get_wid_for_world":
-                print (f"PEEK: {key}")
-                print (df)
-                print ("WID or current world")
-            
+                df = get_data(query, {"global_wids": GLOBAL_WID})  # ✅ Pass list directly
+            else:
+                df = get_data(query, {"time": self.newer_than})    # Your usual param
+
+            if key == "co_block_with_users":
+                print("PEEK")
+                print(df)
+                print("WID set on self")
+                print(self.wid)
+
+            if key == "get_wid_for_world":
+                print(f"PEEK: {key}")
+                print(df)
+                print("WID or current world")
              
             setattr(self, key, df)
 
@@ -800,8 +808,8 @@ class Fetcher:
 
         proximity_threshold = 10  # "Near" range
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaHalf", "BrownDwarf"
         ]
 
         for _, row in self.players.iterrows():
@@ -1011,8 +1019,8 @@ class Fetcher:
         cooldown_period = 300  # seconds (5 mins)
 
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"
         ]
 
         central_tz = pytz.timezone("America/Chicago")
@@ -1112,8 +1120,8 @@ class Fetcher:
 
         proximity_threshold = 10  # "Near" range
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaHalf", "BrownDwarf"
         ]
 
         for _, row in self.players.iterrows():
@@ -1523,10 +1531,19 @@ class Fetcher:
             username = row["username"]
             timestamp = row["time"]
 
-            dt_str = datetime.fromtimestamp(timestamp / 1000, pytz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            trigger_message = f"{username} achieved death in '{row['world']}' at ({row['x']}, {row['y']}, {row['z']}) — {dt_str} Category: Actions A2"
-            self.triggers_list.append((trigger_message, username, priority))
-            print(trigger_message)
+            # Extract death type from "DEATH cause"
+            type_str = row["type"]
+            if type_str.startswith("DEATH"):
+                parts = type_str.split(" ", 1)
+                death_detail = parts[1] if len(parts) > 1 else "unspecified"
+
+                dt_str = datetime.fromtimestamp(timestamp / 1000, pytz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trigger_message = (
+                    f"{username} died from {death_detail} in '{row['world']}' "
+                    f"at ({row['x']}, {row['y']}, {row['z']}) — {dt_str} Category: Actions A2"
+                )
+                self.triggers_list.append((trigger_message, username, priority))
+                print(trigger_message)
 
     def check_visits_to_unowned_region(self):
         trigger_name = "check_visits_to_unowned_region"
@@ -2183,8 +2200,9 @@ class Fetcher:
                     t for t in self.tools_usage[user]["recent_observations"] if current_time - t <= 2 * 60
                 ]
             
-            # Check if the world is "mars" or "sdp7"
-            if world.lower() in ["mars", "sdp7"]:
+            # Check if the world is a build map
+            wid = self.get_wid_for_world(world)
+            if wid in GLOBAL_WID:
                 trigger_message = f"{user} made an observation in {world}."
                 self.triggers_list.append((trigger_message, user, 2))
                 print(trigger_message)
@@ -2193,7 +2211,7 @@ class Fetcher:
         for user, data in self.tools_usage.items():
             worlds_visited = data["worlds_visited"]
             current_world = data["current_world"]
-            world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
+            world_observation_count = data.get("world_ofbservation_counts", {}).get(current_world, 0)
 
             # Check for lack of observations
             if len(worlds_visited) >= 3:
@@ -2837,7 +2855,8 @@ class Fetcher:
                     message = row["message"]
                     for tool in multi_use_tools + single_use_tools:
                         if f"/{tool}" in message:
-                            self.tools_usage[user]["tool_use_count"] += 1
+                            # initialized to 0 in case it's not yet, was causing crashes
+                            self.tools_usage[user]["tool_use_count"] = self.tools_usage[user].get("tool_use_count", 0) + 1
                             tool_key = f"{tool}_{current_world}"
                             self.tools_usage[user].setdefault(tool_key, 0)
                             self.tools_usage[user][tool_key] += 1
@@ -3435,7 +3454,7 @@ class Fetcher:
         duration_threshold = 60  # Duration threshold in seconds
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()
-        disabled_worlds = ["LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen", "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"]
+        disabled_worlds = ["LunarCrater", "TiltedWarm", "TiltedFrozen", "TiltedMelting", "MynoaHalf", "BrownDwarf"]
 
         for _, row in self.players.iterrows():
             user = row["online_user"]
@@ -3493,8 +3512,8 @@ class Fetcher:
         minutes_window = 5
         required_unique_npcs = 2
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaHalf", "BrownDwarf"
         ]
         # =========================================
 
@@ -3595,8 +3614,8 @@ class Fetcher:
         proximity_threshold = 5
         ignore_duration = 10
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaHalf", "BrownDwarf"
         ]
         # ====================================================
 
@@ -3654,8 +3673,8 @@ class Fetcher:
         interaction_threshold = 4
         duration_threshold = 60
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaHalf", "BrownDwarf"
         ]
         # ====================================================
 
@@ -3710,7 +3729,7 @@ class Fetcher:
         duration_threshold = 90  # Duration threshold in seconds
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()
-        disabled_worlds = ["LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen", "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"]
+        disabled_worlds = ["LunarCrater", "TiltedWarm", "TiltedFrozen", "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"]
 
         for _, row in self.players.iterrows():
             user = row["online_user"]
@@ -3763,7 +3782,7 @@ class Fetcher:
             print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
             return
 
-        eligible_worlds = ["Mynoa", "ColderSun", "TiltedEarth", "TwoMoons"]
+        eligible_worlds = ["MynoaMangrove", "ColderStrip", "ColderHot", "ColderCold", "TwoMoons", "TwoMoonsLow", "TiltedWarm", "TitledEarthMelting", "TiltedFrozen"]
         threshold = 0.1  # Minimum absolute x-value to count as "side visit"
 
         # self.tools_usage will now store:
@@ -3941,8 +3960,8 @@ class Fetcher:
         # ====================================================
         duration_threshold = 90  # seconds
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"
         ]
         # ====================================================
 
@@ -4003,8 +4022,8 @@ class Fetcher:
         cooldown_period = 600  # 10 minutes in seconds
 
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"
         ]
 
         central_tz = pytz.timezone("America/Chicago")
@@ -4069,8 +4088,8 @@ class Fetcher:
         # ====================================================
         duration_threshold = 90
         disabled_worlds = [
-            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
-            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
+            "LunarCrater", "TiltedWarm", "TiltedFrozen",
+            "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"
         ]
         # ====================================================
 
