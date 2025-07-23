@@ -3738,7 +3738,9 @@ class Fetcher:
                         self.tools_usage[user]["npc_interaction_start"] = current_time
                         print(f"Setting npc_interaction_start for {user} at {current_time}")
                     interaction_start_time = self.tools_usage[user]["npc_interaction_start"]
-                    if current_time - interaction_start_time >= duration_threshold:
+                    if interaction_start_time is None:
+                        print(f"Warning: Missing interaction_start_time for {user}")
+                        continue
                         trigger_message = f"{user} has been interacting with NPC {object_name} for more than 60 seconds. Category: {category}"
                         self.triggers_list.append((trigger_message, user, priority))
                         print(trigger_message)
