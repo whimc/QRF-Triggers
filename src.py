@@ -3734,20 +3734,25 @@ class Fetcher:
 
                 if distance < interaction_threshold:
                     interacting_with_npc = True
-                    if "npc_interaction_start" not in self.tools_usage[user]:
+
+                    if "npc_interaction_start" not in self.tools_usage[user] or self.tools_usage[user]["npc_interaction_start"] is None:
                         self.tools_usage[user]["npc_interaction_start"] = current_time
                         print(f"Setting npc_interaction_start for {user} at {current_time}")
-                    interaction_start_time = self.tools_usage[user]["npc_interaction_start"]
-                    if interaction_start_time is None:
-                        print(f"Warning: Missing interaction_start_time for {user}")
-                        continue
-                        trigger_message = f"{user} has been interacting with NPC {object_name} for more than 60 seconds. Category: {category}"
-                        self.triggers_list.append((trigger_message, user, priority))
-                        print(trigger_message)
-                        self.tools_usage[user]["npc_interaction_start"] = current_time - 50  # breathing room
                     else:
-                        # print(current_time, interaction_start_time, current_time - interaction_start_time)
-                        print (f"{user} has possible npc interaction. Waiting to reach threshold.")
+                        interaction_start_time = self.tools_usage[user]["npc_interaction_start"]
+
+                        # Only check duration if it's a valid number
+                        if isinstance(interaction_start_time, (float, int)):
+                            elapsed = current_time - interaction_start_time
+                            if elapsed >= duration_threshold:
+                                trigger_message = f"{user} has been interacting with NPC {object_name} for more than {duration_threshold} seconds. Category: {category}"
+                                self.triggers_list.append((trigger_message, user, priority))
+                                print(trigger_message)
+
+                                # Optional reset or breathing room
+                                self.tools_usage[user]["npc_interaction_start"] = current_time - 50
+                        else:
+                            print(f"[WARN] npc_interaction_start for {user} is not numeric: {interaction_start_time}")
                         
                     break
 
