@@ -2238,7 +2238,7 @@ class Fetcher:
                 ]
             
             # Check if the world is a build map
-            wid = self.get_wid_for_world(world)  # Use the actual function, not the dataframe
+            wid = self.get_wid_for_world(world)  # not working right
             if wid in GLOBAL_WID:
                 trigger_message = f"{user} made an observation in {world}."
                 self.triggers_list.append((trigger_message, user, 2))
