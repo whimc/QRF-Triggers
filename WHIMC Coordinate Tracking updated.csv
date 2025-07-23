@@ -105,15 +105,18 @@ MynoaClose,Global,NA,,,,"/magnetic_field, /tides, /temperature, /pressure",,
 MynoaHalf,Global,NA,,,,"/magnetic_field, /tides, /temperature, /humidity, /atmosphere",,
 ,,Volcanos,,,,,,too wide to track
 ,NPCs,Mysterious Mynoan,6,177,,"/observe, /temperature, /magnetic_field",,give side quest
-MynoaFar,Global,NA,,,,"/magnetic_field, /tides, /temperature, /humidity",,
-,Place,Lighthouse,99,-447,"(100,-450) (105,-444)",,,
-,,Museum,-21,-390,"(-12,-391) (-29,-375)",,,
-,Data-based Signals,Loop Portal,-30,398,,,,
+MynoaMangrove,Global,NA,,,,"/magnetic_field, /tides, /temperature, /humidity, /gravity",,
+,Place,Museum,-21,-390,"(286,379) (261,394)","/tides, /gravity, /radius, /gravity, /rotational_period, /magnetic_field, /tectonic",yes,
+,,Habitation,320,336,"(312,315) (331,359)","/wind, /rotational_period, /year, /radiation",yes,
+,,Northern Lights cue,298,167,,"/tides, /magnetic_field",yes,Magnetic fields on horizon
+,,Sunken trees cue,236,159,,"/tides, /pressure",yes,Tidal flooding
+,,Loop Portal,263,389,,,exploration,"Goes back to start of Mynoa, suggests exploration"
+,,Magnetic field statue,275,366,,/magnetic_field,yes,Statue depicting magnetic field lines
+,Data-based Signals,Axial Tilt hint,310,290,,/tilt,exploration,Floating hint to look at tilt
 ,,Water,,,,,,too wide to track
 ,,Terrain,,,,,,too wide to track
-,NPCs,MynoanCitizen,-7,-403,,/tides,,measure tides outside the hosue
-,,Visitor,-22,-378,,"/temperature, /air_pressure, /gravity, /observe",,give quest
-,,MuseumCurator,-19,-381,,,,
+,NPCs,Biologist,303,195,,"/gravity, /magnetic_field",yes,"Explains increased gravitational pull, nearby marker for magnetic fields, height 84"
+,,MuseumCurator,274,388,,/magnetic_field,yes,"Suggests looking at the sky, height 76"
 TwoMoons,Global,NA,,,,"/tides, /daylength, /temperature, /pressure",,
 ,Place,Museum,1,90,"(0,103) (-2,108) (-16,108) (-20,103) (-20,95) (-16,90) (-4,90)",,Yes,
 ,,"Buoy, rock, retention wall",79,51,,,exploration,three indicators of tide status
