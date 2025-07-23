@@ -5175,13 +5175,13 @@ if __name__ == "__main__":
         type=str,
         default=None,
     )
-    
+
     # add wid to argument parser
     parser.add_argument(
-    "--wid",
-    help="Specify the world ID (wid)",
-    type=int,
-    required=True
+        "--wid",
+        help="Optional: specify a single world ID (wid) to override GLOBAL_WID",
+        type=int,
+        required=False
     )
 
     args = parser.parse_args()
@@ -5196,8 +5196,9 @@ if __name__ == "__main__":
 print("Fetcher type at runtime:", type(Fetcher))
 
 central_tz = pytz.timezone("America/Chicago")
-fetcher = Fetcher(args.initial_newer_than, args.saveload, args.wid)
-print(f"\033[93mCONFIG → World ID set to: {args.wid}\033[0m")
+wid_list = [args.wid] if args.wid is not None else GLOBAL_WID
+fetcher = Fetcher(args.initial_newer_than, args.saveload, wid_list)
+print(f"\033[93mCONFIG → World IDs set to: {wid_list}\033[0m")
     
 # Start Trigger Manager GUI in a separate thread
 gui_thread = threading.Thread(target=launch_trigger_manager)
