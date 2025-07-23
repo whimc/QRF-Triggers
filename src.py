@@ -504,7 +504,7 @@ class Fetcher:
         self.co_command_with_worlds = pd.DataFrame()
         self.co_chat_with_worlds = pd.DataFrame()
         self.co_block_with_users = pd.DataFrame()
-        self.get_wid_for_world = pd.DataFrame()
+        self.df_get_wid_for_world = pd.DataFrame()
         self.get_co_blocks = pd.DataFrame()
         self.get_airclicks = pd.DataFrame()
         self.get_visits_to_unowned_region = pd.DataFrame()
@@ -2238,7 +2238,7 @@ class Fetcher:
                 ]
             
             # Check if the world is a build map
-            wid = self.get_wid_for_world(world)
+            wid = self.get_wid_for_world(world)  # Use the actual function, not the dataframe
             if wid in GLOBAL_WID:
                 trigger_message = f"{user} made an observation in {world}."
                 self.triggers_list.append((trigger_message, user, 2))
