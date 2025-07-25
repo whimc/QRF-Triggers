@@ -1,5 +1,5 @@
 # Based on 22 July 2025 version from Neithan
-# modified by Geph for AIED demo 24 July 2025
+# modified by Geph for U Maine QRF camp 28 July to 1 August 2025
 
 #127 = SDP12 junior high at Fiske - ideal for demos
 #129 = uncc25am beginners at UNCC
