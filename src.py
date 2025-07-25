@@ -58,7 +58,7 @@ def is_trigger_enabled(name): # @Luc, @Geph: This is a deprecated fn but please 
             return config.get(name, True)
     except:
         return True  # Default to enabled if config is missing
-        
+
 def get_trigger_settings(trigger_name):
     with open("trigger_config.json", "r") as f:
         config = json.load(f)
@@ -68,7 +68,7 @@ def get_trigger_settings(trigger_name):
 def get_trigger_field(trigger_name, field_name, default=None):
     with open("trigger_config.json", "r") as f:
         config = json.load(f)
-    return config.get(trigger_name, {}).get(field_name, default)    
+    return config.get(trigger_name, {}).get(field_name, default)
 
 # =============================================================================
 # Database Connection
@@ -320,8 +320,8 @@ select user
       , world_id, x, y, z
       , type
       , action
-from co_block where wid = 118 and
--- this should be a variable defined at startup, not hardcoded; wid 111 = sdp7
+from co_block where wid = 133 and
+-- this should be a variable defined at startup, not hardcoded; wid 111 = Umaine25am
 where from_unixtime(time) >= '{newer_than}'
 -- timestamp is 10 digit unix precision
 """
@@ -347,28 +347,14 @@ select id
       , material
 from co_material_map
 """
-'''
+
+# @neithan this should probably be disabled or changed:
 GET_WID_FOR_WORLD = """
-SELECT w.rowid AS wid
-FROM co_world w
-WHERE w.rowid IN :global_wids
+select w.rowid as wid
+from co_world w
+where w.world = 'Umaine25am'
 """
-'''
 
-# =========================
-# Updating from static WID
-# =========================
-
-def make_get_wid_query(wids):
-    if not wids:
-        raise ValueError("GLOBAL_WID list is empty.")
-    placeholders = ", ".join(["%s"] * len(wids))
-    query = f"""
-    SELECT w.rowid AS wid
-    FROM co_world w
-    WHERE w.rowid IN ({placeholders})
-    """
-    return query, tuple(wids)
 
 block_trigger_cooldowns = {}  # maps username -> last_trigger_time
 block_trigger_cooldown_seconds = 100000
@@ -424,13 +410,8 @@ def send_trigger(trigger_name: str, username: str, priority: int):
         print(f"An error occurred: {e}")
 
 
-from sqlalchemy import text
-
-def get_data(query, params=None):
-    if isinstance(query, str):
-        return pd.read_sql(text(query), ENG, params=params)
-    else:
-        return query  # fallback, if query is already a DataFrame
+def get_data(query, newer_than: datetime | None = None) -> pd.DataFrame:
+    return pd.read_sql(query.format(newer_than=newer_than), ENG)
 
 
 # =============================================================================
@@ -450,7 +431,7 @@ class Fetcher:
         "co_command": GET_CO_COMMAND,
         "co_command_with_worlds": GET_CO_COMMAND_WITH_WORLDS,
         "co_block_with_users": GET_CO_BLOCK_WITH_USERS, # will dynamically load for the world set in --wid in command line startup
-        "get_wid_for_world": make_get_wid_query,
+        "get_wid_for_world": GET_WID_FOR_WORLD,
         "get_tables": GET_TABLES,
         "get_deaths": GET_DEATHS,
         "get_co_blocks": GET_CO_BLOCKS,
@@ -461,27 +442,10 @@ class Fetcher:
 
     def load_data(self):
         for key, query in Fetcher.CMDS.items():
-            if key == "get_wid_for_world":
-                # Special case: function that returns (query_string, tuple_params)
-                query_str, query_params = query(GLOBAL_WID)
-                df = pd.read_sql(query_str, ENG, params=query_params)
-                print(f"[DEBUG] get_wid_for_world result:")
-                print(df)
-            else:
-                # Handle typical SQL strings with optional params
-                params = {}
-                if isinstance(query, str):
-                    if ":time" in query or "%(time)" in query:
-                        params["time"] = self.newer_than
-                    if ":global_wids" in query or "%(global_wids)" in query:
-                        params["global_wids"] = GLOBAL_WID
-
-                    df = get_data(query, params)
-                else:
-                    raise TypeError(f"Unexpected type for query '{key}': {type(query)}")
-
+            df = get_data(query, self.newer_than)
             setattr(self, key, df)
-            
+
+
     def __init__(self, initial_newer_than, saveload_file=None, wid=None):
         self.newer_than = initial_newer_than
         self.saveload_file = saveload_file
@@ -490,7 +454,7 @@ class Fetcher:
         self.block_triggers_df = pd.read_csv('BlockBasedTriggers.csv')
         # indicate a start-time of script
         self.start_time = datetime.now(central_tz).timestamp()
-              
+
 
         # Mostly for type hinting
         self.commands = pd.DataFrame()
@@ -508,11 +472,11 @@ class Fetcher:
         self.get_co_blocks = pd.DataFrame()
         self.get_airclicks = pd.DataFrame()
         self.get_visits_to_unowned_region = pd.DataFrame()
-        
-        
+
+
         # Luc added
         self.prev_trig_time = pd.DataFrame(columns=['User', 'Material', 'Action', 'H_or_l', 'Time'])
-        
+
         self.load_data()
 
         # this is for random trigger that fires when inactivity is detected
@@ -529,12 +493,12 @@ class Fetcher:
         else:
             self.tools_usage = {}
 
-        #self.initialize_tool_usage()
+        self.initialize_tool_usage()
         self.observations_record = {}
         self.pair_durations = defaultdict(int)
-        
+
         self.lastTriggerTimePerUser = {}
-        
+
         self.get_deaths = pd.DataFrame()
         self.block_breaks_already_triggered = set()
         self.unowned_region_already_triggered = set()
@@ -548,7 +512,7 @@ class Fetcher:
                 f"\033[92mProgress saved to '{self.saveload_file}'. \nIt is now safe to stop the python script.\n \033[0m"
             )
     '''
-    
+
     '''
     def save_tools_usage(self):
         # Deep copy to avoid mutating the live structure
@@ -563,7 +527,7 @@ class Fetcher:
         with open("tools_usage.json", "w") as f:
             json.dump(serializable_tools_usage, f, indent=2)
     '''
-    
+
     def save_tools_usage(self):
         from copy import deepcopy
 
@@ -582,33 +546,33 @@ class Fetcher:
                 f"\033[92mProgress saved to '{self.saveload_file}'.\nIt is now safe to stop the Python script.\033[0m\n"
             )
 
+
+
+
     def fetch_data(self):
         for key, query in Fetcher.CMDS.items():
-            if key == "get_wid_for_world":
-                query_str, query_params = query(GLOBAL_WID)
-                df = pd.read_sql(query_str, ENG, params=query_params)
-            else:
-                df = pd.read_sql(text(query), ENG, params={"time": self.newer_than})
+            df = get_data(query, self.newer_than)
+            # Set 'self.<key>' to the new dataframe
 
-            # Set 'self.<key>' to the new dataframe (optional: setattr)
+
+            if key == "co_block_with_users":
+                print ("PEEK")
+                print (df)
+                print ("WID set on self")
+                print (self.wid)
+
+
+
+            if key == "get_wid_for_world":
+                print (f"PEEK: {key}")
+                print (df)
+                print ("WID or current world")
+
+
             setattr(self, key, df)
 
-            # debugging
-            if key == "co_block_with_users":
-                print("PEEK")
-                print(df)
-                print("WID set on self")
-                print(self.wid)
+        self.save_tools_usage()  # save after fetching the data
 
-            if key == "get_wid_for_world":
-                print(f"PEEK: {key}")
-                print(df)
-                print("WID or current world")
-
-                setattr(self, key, df)
-
-            self.save_tools_usage()  # save after fetching the data
-        
     def fetch_data_playersonly(self):
         for key, query in Fetcher.CMDS.items():
             if key == "players":
@@ -616,8 +580,8 @@ class Fetcher:
                 # Set 'self.<key>' to the new dataframe
                 setattr(self, key, df)
 
-        self.save_tools_usage()  # save after fetching the data    
-    
+        self.save_tools_usage()  # save after fetching the data
+
     def fetch_data_observationsonly(self):
         for key, query in Fetcher.CMDS.items():
             if key == "observations":
@@ -625,7 +589,7 @@ class Fetcher:
                 # Set 'self.<key>' to the new dataframe
                 setattr(self, key, df)
 
-        self.save_tools_usage()  # save after fetching the data    
+        self.save_tools_usage()  # save after fetching the data
 
     def on_wakeup(self):
         # Use global variables
@@ -648,7 +612,7 @@ class Fetcher:
         print(f"SCIENCE TOOLS:\n{self.science_tools}\n")
         print(f"OBSERVATIONS RECORD:\n{self.observations_record}\n")
         '''
-        
+
         if not self.players.empty:
             print(f"\033[95m\nONLINE PLAYERS:\033[0m\n{self.players}\n")
 
@@ -663,10 +627,10 @@ class Fetcher:
 
         if self.observations_record:  # Assuming observations_record is a dictionary: nts: Check this occassionally
             print(f"\033[95m\nOBSERVATIONS RECORD:\033[0m\n{self.observations_record}\n")
-            
-        if not self.co_chat.empty: 
+
+        if not self.co_chat.empty:
             print(f"\033[95m\nLATEST CHATS:\033[0m\n{self.co_chat}\n")
-        
+
         # print(f"CO_SESSION:\n{self.co_session}\n")
 
         # Initialize tools_usage for all online players so we can get the worlds visited, and curr world data even
@@ -676,7 +640,7 @@ class Fetcher:
             user = row["online_user"]
             current_world = row["world"]
             position_time = row["position_time"]
-           
+
 
             if user not in self.tools_usage:
                 self.tools_usage[user] = {
@@ -714,11 +678,11 @@ class Fetcher:
                 # Add to worlds_visited if not already there
                 if current_world not in self.tools_usage[user]["worlds_visited"]:
                     self.tools_usage[user]["worlds_visited"].append(current_world)
-                    
-                # Racing / non-stopping 
+
+                # Racing / non-stopping
                 if 'recent_positions' not in self.tools_usage[user]:
                     self.tools_usage[user]['recent_positions'] = []
-                    
+
                 # Initialize world_tool_counts if not present
                 if 'world_tool_counts' not in self.tools_usage[user]:
                     self.tools_usage[user]['world_tool_counts'] = {}
@@ -731,7 +695,7 @@ class Fetcher:
 
                 if current_world not in self.tools_usage[user]['chat_counts']:
                     self.tools_usage[user]['chat_counts'][current_world] = 0
-                    
+
                 if 'tool_counts' not in self.tools_usage[user]:
                     self.tools_usage[user]['tool_counts'] = {}
 
@@ -745,16 +709,16 @@ class Fetcher:
                 self.tools_usage[user]["last_tool_use_time"] = now.timestamp()
                 print(f"Last observation time: {self.tools_usage[user]['last_observation_time']}")
                 print(f"Last tool use time: {self.tools_usage[user]['last_tool_use_time']}")
-                '''       
+                '''
 
-        # note to self: REGISTER NEW TRIGGER TO FIRE HERE, REGISTER TRIGGER
+                # note to self: REGISTER NEW TRIGGER TO FIRE HERE, REGISTER TRIGGER
 
         # check for triggers and populate triggers_list
         self.update_tool_usage()
         self.update_observation_usage()
         self.check_mynoa_observations()
         self.check_activities_near_important_places()
-        
+
         # summer2024newtriggers
         self.check_no_observations_last_20_minutes()
         self.check_racing_non_stopping()
@@ -764,7 +728,7 @@ class Fetcher:
         self.check_3_chat_entries_in_1_minute()
         self.check_long_pair_close()
         self.check_long_far_from_crowd()
-        self.check_prolonged_interaction_npc() 
+        self.check_prolonged_interaction_npc()
         self.check_prolonged_stay_poi()
         self.check_teleporting_to_multiple_players()
         self.check_specific_commands()
@@ -775,7 +739,7 @@ class Fetcher:
         self.check_over_200_placed_actions_in_2_minutes()
         self.check_over_200_destroyed_actions_in_2_minutes()
         self.check_block_triggers()
-        
+
         # new triggers for new summer camp
         self.achieves_death()
         self.check_block_breaks_by_others()
@@ -807,7 +771,7 @@ class Fetcher:
         self.check_possible_afk_behavior()
         self.check_movement_toward_npc_or_poi()
         self.check_in_pause_box()
-        
+
         # print(f"TOOLS & OBSERVATION USAGE (SAVED): \n{self.tools_usage}\n")
 
         # Send all triggers
@@ -847,8 +811,8 @@ class Fetcher:
 
         proximity_threshold = 10  # "Near" range
         disabled_worlds = [
-            "LunarCrater", "TiltedWarm", "TiltedFrozen",
-            "TiltedMelting", "MynoaHalf", "BrownDwarf"
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
         ]
 
         for _, row in self.players.iterrows():
@@ -881,10 +845,10 @@ class Fetcher:
 
             if nearest_distance <= proximity_threshold:
                 if (
-                    prev_dist is not None and
-                    prev_world == current_world and
-                    nearest_object == prev_object and
-                    nearest_distance < prev_dist
+                        prev_dist is not None and
+                        prev_world == current_world and
+                        nearest_object == prev_object and
+                        nearest_distance < prev_dist
                 ):
                     msg = (
                         f"{user} moved *toward* {nearest_object} in {current_world}. "
@@ -1058,8 +1022,8 @@ class Fetcher:
         cooldown_period = 300  # seconds (5 mins)
 
         disabled_worlds = [
-            "LunarCrater", "TiltedWarm", "TiltedFrozen",
-            "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
         ]
 
         central_tz = pytz.timezone("America/Chicago")
@@ -1159,8 +1123,8 @@ class Fetcher:
 
         proximity_threshold = 10  # "Near" range
         disabled_worlds = [
-            "LunarCrater", "TiltedWarm", "TiltedFrozen",
-            "TiltedMelting", "MynoaHalf", "BrownDwarf"
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
         ]
 
         for _, row in self.players.iterrows():
@@ -1209,6 +1173,8 @@ class Fetcher:
                     self.tools_usage[user].pop("m7_object", None)
 
 
+
+
     def check_appropriate_tool_use_near_poi(self):
         trigger_name = "check_appropriate_tool_use_near_poi"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -1242,14 +1208,14 @@ class Fetcher:
                     is_close = False
 
                     if (
-                        "range" in details and
-                        self.is_point_inside_space(x, z, details["range"])
+                            "range" in details and
+                            self.is_point_inside_space(x, z, details["range"])
                     ):
                         is_close = True
 
                     elif (
-                        all(k in details for k in ("x", "z")) and
-                        None not in (x, z, details["x"], details["z"])
+                            all(k in details for k in ("x", "z")) and
+                            None not in (x, z, details["x"], details["z"])
                     ):
                         dx = abs(x - details["x"])
                         dz = abs(z - details["z"])
@@ -1333,7 +1299,7 @@ class Fetcher:
                 self.triggers_list.append((message, username, priority))
                 print(f"\033[93m{message}\033[0m")
     '''
-    
+
     def check_question_like_observation(self):
         trigger_name = "check_question_like_observation"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -1473,7 +1439,7 @@ class Fetcher:
                 self.triggers_list.append((trigger_message, user, priority))
                 print(trigger_message)
 
-    
+
     def check_low_x_axis_movement(self):
         trigger_name = "check_low_x_axis_movement"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -1568,19 +1534,10 @@ class Fetcher:
             username = row["username"]
             timestamp = row["time"]
 
-            # Extract death type from "DEATH cause"
-            type_str = row["type"]
-            if type_str.startswith("DEATH"):
-                parts = type_str.split(" ", 1)
-                death_detail = parts[1] if len(parts) > 1 else "unspecified"
-
-                dt_str = datetime.fromtimestamp(timestamp / 1000, pytz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                trigger_message = (
-                    f"{username} died from {death_detail} in '{row['world']}' "
-                    f"at ({row['x']}, {row['y']}, {row['z']}) — {dt_str} Category: Actions A2"
-                )
-                self.triggers_list.append((trigger_message, username, priority))
-                print(trigger_message)
+            dt_str = datetime.fromtimestamp(timestamp / 1000, pytz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            trigger_message = f"{username} achieved death in '{row['world']}' at ({row['x']}, {row['y']}, {row['z']}) — {dt_str} Category: Actions A2"
+            self.triggers_list.append((trigger_message, username, priority))
+            print(trigger_message)
 
     def check_visits_to_unowned_region(self):
         trigger_name = "check_visits_to_unowned_region"
@@ -1657,7 +1614,7 @@ class Fetcher:
             else:
                 print(f"{username} had {click_count} airclicks — below threshold.")
     '''
-    
+
     def check_airclick_burst(self):
         trigger_name = "check_airclick_burst"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -1894,7 +1851,7 @@ class Fetcher:
                         self.triggers_list.append((trigger_message, user, priority))
                         break
     '''
-    
+
     def check_activities_near_important_places(self):
         # Now includes aliases
         slash_commands_in_expected_actions = [
@@ -2017,7 +1974,7 @@ class Fetcher:
                         self.triggers_list.append((trigger_message, user, priority))
                         break
 
-        
+
     # Rachel Zhou's code edited to work with .self
     def define_polygon_boundary(self, range_str):
         if not range_str:
@@ -2100,7 +2057,7 @@ class Fetcher:
                 self.tools_usage[user]["mynoa_start_time"] = None
                 self.tools_usage[user]["mynoa_trigger_fired"] = False
     '''
-    
+
     def check_mynoa_observations(self):
         trigger_name = "check_mynoa_observations"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -2145,13 +2102,13 @@ class Fetcher:
 
     def update_observation_usage(self):
         central_tz = pytz.timezone("America/Chicago")
-        
+
         for _, row in self.observations.iterrows():
             user = row["username"]
             world = row["world"]
             position_time = row["time"]
 
-            
+
             # Convert position_time to a string if it's a Timestamp
             if isinstance(position_time, pd.Timestamp):
                 position_time = position_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -2181,7 +2138,7 @@ class Fetcher:
                     self.triggers_list.append((trigger_message, user, 5))
                     break  # Exit after finding one nearby observation to avoid multiple triggers for the same event
             '''
-            
+
             # Check for nearby observations
             for obs_x, obs_z, obs_user, obs_text in self.observations_record[world]:
                 distance = abs(x - obs_x) + abs(z - obs_z)  # Manhattan distance
@@ -2205,7 +2162,7 @@ class Fetcher:
                     self.triggers_list.append((trigger_message, user, priority))
                     break  # Exit after finding one nearby observation to avoid multiple triggers
 
-            
+
             if user not in self.tools_usage:
                 self.tools_usage[user] = {
                     "worlds_visited": [world],
@@ -2236,19 +2193,18 @@ class Fetcher:
                 self.tools_usage[user]["recent_observations"] = [
                     t for t in self.tools_usage[user]["recent_observations"] if current_time - t <= 2 * 60
                 ]
-            
-            # Check if the world is a build map
-            wid = self.get_wid_for_world(world)
-            if wid in GLOBAL_WID:
+
+            # Check if the world is "mars" or "sdp7"
+            if world.lower() in ["mars", "sdp7"]:
                 trigger_message = f"{user} made an observation in {world}."
                 self.triggers_list.append((trigger_message, user, 2))
                 print(trigger_message)
-        
+
         '''
         for user, data in self.tools_usage.items():
             worlds_visited = data["worlds_visited"]
             current_world = data["current_world"]
-            world_observation_count = data.get("world_ofbservation_counts", {}).get(current_world, 0)
+            world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
 
             # Check for lack of observations
             if len(worlds_visited) >= 3:
@@ -2285,7 +2241,7 @@ class Fetcher:
                     self.triggers_list.append((f"{user} has made 5 observations in {current_world}", user, 7))
                     data[high_obs_trigger_key] = True
         '''
-        
+
         for user, data in self.tools_usage.items():
             worlds_visited = data["worlds_visited"]
             current_world = data["current_world"]
@@ -2348,13 +2304,13 @@ class Fetcher:
         # Get the current time in the America/Chicago timezone
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()  # Get the current Unix timestamp
-        
+
         # Initialize the last observation and tool usage times for all users
         for user in self.tools_usage.keys():
             # Set both the observation and tool use time to the current time
             self.tools_usage[user]["last_observation_time"] = current_time
             self.tools_usage[user]["last_tool_use_time"] = current_time
-            
+
             # Log the initialization
             print(f"Initialized last_observation_time and last_tool_use_time for {user} to current time.")
 
@@ -2569,13 +2525,13 @@ class Fetcher:
                     break  # Only fire once per user per 10-min slice
 
 
-                
+
     def check_no_observations_last_20_minutes(self):
-    
+
         trigger_name = "check_no_observations_last_20_minutes"
         enabled, priority, category = get_trigger_settings(trigger_name)
 
-        
+
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()
 
@@ -2601,8 +2557,8 @@ class Fetcher:
                     # Update last trigger time
                     self.lastTriggerTimePerUser[user] = current_time
                 else:
-                    print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user}. — Cooldown Active.\033[0m")    
-    
+                    print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user}. — Cooldown Active.\033[0m")
+
     '''
     def check_last_tool_use_over_20_minutes(self):
         central_tz = pytz.timezone("America/Chicago")
@@ -2629,7 +2585,7 @@ class Fetcher:
             else:
                 print(f"Skipping user {user} because their last tool use was before the script started.")
     '''
-    
+
     '''
     def check_last_tool_use_over_20_minutes(self):
         central_tz = pytz.timezone("America/Chicago")
@@ -2653,7 +2609,7 @@ class Fetcher:
                 else:
                     print(f"(Last Tool Use) Cooldown active for {user}. Trigger skipped.")
     '''
-    
+
     def check_last_tool_use_over_20_minutes(self):
         trigger_name = "check_last_tool_use_over_20_minutes"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -2664,11 +2620,11 @@ class Fetcher:
         current_time = datetime.now(central_tz).timestamp()
 
         for user, data in self.tools_usage.items():
-        
+
             if not enabled:
                 print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
                 return
-                
+
             last_tool_use_time = data.get("last_tool_use_time", self.start_time)
 
             if current_time - last_tool_use_time > 20 * 60:
@@ -2680,7 +2636,7 @@ class Fetcher:
                     print(trigger_message)
                     self.lastTriggerTimePerUser[user] = current_time
                 else:
-                    print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user}. — Cooldown Active.\033[0m")  
+                    print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user}. — Cooldown Active.\033[0m")
 
 
 
@@ -2708,7 +2664,7 @@ class Fetcher:
                 self.triggers_list.append((trigger_message, username, 7))
                 print(trigger_message)
     '''
-    
+
     def check_3_chat_entries_in_1_minute(self):
         trigger_name = "check_3_chat_entries_in_1_minute"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -2751,7 +2707,7 @@ class Fetcher:
                 # Clear recent observations to avoid repeated triggers
                 self.tools_usage[user]["recent_observations"] = []
     '''
-    
+
     def check_3_observations_in_2_minutes(self):
         trigger_name = "check_3_observations_in_2_minutes"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -2772,7 +2728,7 @@ class Fetcher:
                 # Clear recent observations to avoid repeated triggers
                 self.tools_usage[user]["recent_observations"] = []
 
-    
+
     def update_tool_usage(self):
         # Define lists of tools for different usage checks
         multi_use_tools = ["gravity", "pressure", "atmosphere"]
@@ -2842,7 +2798,7 @@ class Fetcher:
 
                     if world not in self.tools_usage[user]["worlds_visited"]:
                         self.tools_usage[user]["worlds_visited"].append(world)
-                        
+
                     if world not in self.tools_usage[user]["world_tool_counts"]:
                         self.tools_usage[user]["world_tool_counts"][world] = 0
 
@@ -2865,15 +2821,15 @@ class Fetcher:
                     self.tools_usage[user]["tool_usage_timestamps"] = [
                         t for t in self.tools_usage[user]["tool_usage_timestamps"] if current_time - t <= 60
                     ]
-                    
+
                     # Check if the world is "mars" or "sdp7"
                     if world.lower() in ["mars", "sdp7"]:
                         trigger_message = f"{user} has used {tool} in {world}."
                         self.triggers_list.append((trigger_message, user, 2))
                         print(trigger_message)
-                        
-        self.check_tool_use_counts()                
-        
+
+        self.check_tool_use_counts()
+
 
         # Process the recorded usage to trigger events or logging
         for user, data in self.tools_usage.items():
@@ -2892,8 +2848,7 @@ class Fetcher:
                     message = row["message"]
                     for tool in multi_use_tools + single_use_tools:
                         if f"/{tool}" in message:
-                            # initialized to 0 in case it's not yet, was causing crashes
-                            self.tools_usage[user]["tool_use_count"] = self.tools_usage[user].get("tool_use_count", 0) + 1
+                            self.tools_usage[user]["tool_use_count"] += 1
                             tool_key = f"{tool}_{current_world}"
                             self.tools_usage[user].setdefault(tool_key, 0)
                             self.tools_usage[user][tool_key] += 1
@@ -2950,7 +2905,7 @@ class Fetcher:
             # =============================================================================
             # Check for high tools use (>10 first 3 worlds, >5 succeeding worlds)
             # =============================================================================
-            
+
             '''
             # Trigger conditions for high tool use
             high_use_trigger_key = f"high_use_{current_world}"
@@ -2977,7 +2932,7 @@ class Fetcher:
                 )
                 data[high_use_trigger_key] = True
             '''
-            
+
             trigger_name = "check_high_tool_use"
             enabled, priority, category = get_trigger_settings(trigger_name)
 
@@ -2986,7 +2941,7 @@ class Fetcher:
                 current_world = data.get("current_world")
                 world_tool_key = f"tool_count_{current_world}"
                 data.setdefault(world_tool_key, 0)
-                
+
                 if not enabled:
                     print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
                     continue
@@ -2995,9 +2950,9 @@ class Fetcher:
                 tool_count = data.get(world_tool_key, 0)
 
                 if (
-                    len(worlds_visited) <= 3
-                    and tool_count > 10
-                    and not data.get(high_use_trigger_key, False)
+                        len(worlds_visited) <= 3
+                        and tool_count > 10
+                        and not data.get(high_use_trigger_key, False)
                 ):
                     trigger_message = f"{user} has high tool use in the first three worlds: {current_world}. Category: {category}"
                     print(trigger_message)
@@ -3005,9 +2960,9 @@ class Fetcher:
                     data[high_use_trigger_key] = True
 
                 elif (
-                    len(worlds_visited) > 3
-                    and tool_count > 5
-                    and not data.get(high_use_trigger_key, False)
+                        len(worlds_visited) > 3
+                        and tool_count > 5
+                        and not data.get(high_use_trigger_key, False)
                 ):
                     trigger_message = f"{user} has high tool use in subsequent worlds: {current_world}. Category: {category}"
                     print(trigger_message)
@@ -3075,7 +3030,7 @@ class Fetcher:
                         )
                         self.tools_usage[user][tool_flag_key] = 1
             '''
-            
+
             # Combined multi-use tool check
             multi_trigger = "check_combined_multi_use_tools"
             multi_enabled, multi_priority, category = get_trigger_settings(multi_trigger)
@@ -3141,7 +3096,7 @@ class Fetcher:
                 # Clear the tool usage timestamps to avoid repeated triggers
                 self.tools_usage[user]["tool_usage_timestamps"] = []
     '''
-    
+
     def check_3_tools_in_1_minute(self):
         trigger_name = "check_3_tools_in_1_minute"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -3192,7 +3147,7 @@ class Fetcher:
                 print(trigger_message)   
                 self.tools_usage[user]['recent_positions'] = []
     '''
-    
+
     def check_racing_non_stopping(self):
         trigger_name = "check_racing_non_stopping"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -3228,9 +3183,9 @@ class Fetcher:
 
     def update_positions_every_3_seconds(self):
         while True:
-        
+
             self.fetch_data_playersonly() # re-fetch the player position data.
-        
+
             for _, row in self.players.iterrows():
                 user = row['online_user']
                 current_world = row['world']
@@ -3321,7 +3276,7 @@ class Fetcher:
                 print ()
 
     '''
-    
+
     def check_long_pair_close(self):
         trigger_name = "check_long_pair_close"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -3491,7 +3446,7 @@ class Fetcher:
         duration_threshold = 60  # Duration threshold in seconds
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()
-        disabled_worlds = ["LunarCrater", "TiltedWarm", "TiltedFrozen", "TiltedMelting", "MynoaHalf", "BrownDwarf"]
+        disabled_worlds = ["LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen", "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"]
 
         for _, row in self.players.iterrows():
             user = row["online_user"]
@@ -3549,8 +3504,8 @@ class Fetcher:
         minutes_window = 5
         required_unique_npcs = 2
         disabled_worlds = [
-            "LunarCrater", "TiltedWarm", "TiltedFrozen",
-            "TiltedMelting", "MynoaHalf", "BrownDwarf"
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
         ]
         # =========================================
 
@@ -3627,7 +3582,7 @@ class Fetcher:
         flagged = command_data[
             command_data['message'].str.startswith(tuple(trigger_commands)) &
             ~command_data['world'].isin(excluded_worlds)
-        ]
+            ]
 
         for _, row in flagged.iterrows():
             username = row['username']
@@ -3651,8 +3606,8 @@ class Fetcher:
         proximity_threshold = 5
         ignore_duration = 10
         disabled_worlds = [
-            "LunarCrater", "TiltedWarm", "TiltedFrozen",
-            "TiltedMelting", "MynoaHalf", "BrownDwarf"
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
         ]
         # ====================================================
 
@@ -3710,8 +3665,8 @@ class Fetcher:
         interaction_threshold = 4
         duration_threshold = 60
         disabled_worlds = [
-            "LunarCrater", "TiltedWarm", "TiltedFrozen",
-            "TiltedMelting", "MynoaHalf", "BrownDwarf"
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
         ]
         # ====================================================
 
@@ -3734,33 +3689,26 @@ class Fetcher:
 
                 if distance < interaction_threshold:
                     interacting_with_npc = True
-
-                    if "npc_interaction_start" not in self.tools_usage[user] or self.tools_usage[user]["npc_interaction_start"] is None:
+                    if "npc_interaction_start" not in self.tools_usage[user]:
                         self.tools_usage[user]["npc_interaction_start"] = current_time
                         print(f"Setting npc_interaction_start for {user} at {current_time}")
+                    interaction_start_time = self.tools_usage[user]["npc_interaction_start"]
+                    if current_time - interaction_start_time >= duration_threshold:
+                        trigger_message = f"{user} has been interacting with NPC {object_name} for more than 60 seconds. Category: {category}"
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(trigger_message)
+                        self.tools_usage[user]["npc_interaction_start"] = current_time - 50  # breathing room
                     else:
-                        interaction_start_time = self.tools_usage[user]["npc_interaction_start"]
+                        # print(current_time, interaction_start_time, current_time - interaction_start_time)
+                        print (f"{user} has possible npc interaction. Waiting to reach threshold.")
 
-                        # Only check duration if it's a valid number
-                        if isinstance(interaction_start_time, (float, int)):
-                            elapsed = current_time - interaction_start_time
-                            if elapsed >= duration_threshold:
-                                trigger_message = f"{user} has been interacting with NPC {object_name} for more than {duration_threshold} seconds. Category: {category}"
-                                self.triggers_list.append((trigger_message, user, priority))
-                                print(trigger_message)
-
-                                # Optional reset or breathing room
-                                self.tools_usage[user]["npc_interaction_start"] = current_time - 50
-                        else:
-                            print(f"[WARN] npc_interaction_start for {user} is not numeric: {interaction_start_time}")
-                        
                     break
 
             if not interacting_with_npc:
                 if "npc_interaction_start" in self.tools_usage[user]:
                     print(f"Removing npc_interaction_start for {user} as they moved away from all NPCs")
                 self.tools_usage[user].pop("npc_interaction_start", None)
-    
+
     '''
     def check_prolonged_stay_poi(self):
         
@@ -3773,7 +3721,7 @@ class Fetcher:
         duration_threshold = 90  # Duration threshold in seconds
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()
-        disabled_worlds = ["LunarCrater", "TiltedWarm", "TiltedFrozen", "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"]
+        disabled_worlds = ["LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen", "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"]
 
         for _, row in self.players.iterrows():
             user = row["online_user"]
@@ -3894,9 +3842,9 @@ class Fetcher:
             for j in range(i):
                 previous = df.iloc[j]
                 if (
-                    current["username"] != previous["username"]
-                    and current["world"] == previous["world"]
-                    and current["tool"] == previous["tool"]
+                        current["username"] != previous["username"]
+                        and current["world"] == previous["world"]
+                        and current["tool"] == previous["tool"]
                 ):
                     msg = (
                         f"{current['username']} used {current['tool']} after {previous['username']} used the same tool. "
@@ -3946,9 +3894,9 @@ class Fetcher:
             for j in range(i):
                 previous = df.iloc[j]
                 if (
-                    current["username"] != previous["username"]
-                    and current["world"] == previous["world"]
-                    and current["tool"] != previous["tool"]  # <— prevent duplicates handled by specific version
+                        current["username"] != previous["username"]
+                        and current["world"] == previous["world"]
+                        and current["tool"] != previous["tool"]  # <— prevent duplicates handled by specific version
                 ):
                     msg = (
                         f"{current['username']} used {current['tool']} after {previous['username']} used {previous['tool']} in {current['world']}. "
@@ -4066,8 +4014,8 @@ class Fetcher:
         cooldown_period = 600  # 10 minutes in seconds
 
         disabled_worlds = [
-            "LunarCrater", "TiltedWarm", "TiltedFrozen",
-            "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
         ]
 
         central_tz = pytz.timezone("America/Chicago")
@@ -4120,7 +4068,7 @@ class Fetcher:
                     print(f"{user} entered a POI. Clearing outside_poi_start timer.")
                 self.tools_usage[user].pop("outside_poi_start", None)
 
-    
+
     def check_prolonged_stay_poi(self):
         trigger_name = "check_prolonged_stay_poi"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -4132,8 +4080,8 @@ class Fetcher:
         # ====================================================
         duration_threshold = 90
         disabled_worlds = [
-            "LunarCrater", "TiltedWarm", "TiltedFrozen",
-            "TiltedMelting", "MynoaClose", "MynoaHalf", "Cancri", "BrownDwarf"
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
         ]
         # ====================================================
 
@@ -4246,7 +4194,7 @@ class Fetcher:
                 trigger_message = f"{username} tried teleporting to multiple players ({target_users}) in a single command. Category: {category}"
                 self.triggers_list.append((trigger_message, username, priority))
                 print(trigger_message)
-    
+
     '''
     def check_specific_commands(self):
         # Fetch the current command data
@@ -4311,7 +4259,7 @@ class Fetcher:
         specific_commands = command_data[
             command_data['message'].str.startswith(tuple(trigger_commands)) &
             ~command_data['world'].isin(excluded_worlds)
-        ]
+            ]
 
         for _, row in specific_commands.iterrows():
             username = row['username']
@@ -4320,7 +4268,7 @@ class Fetcher:
             trigger_message = f"{username} used the command '{command}' in world '{world}'. Category: {category}"
             self.triggers_list.append((trigger_message, username, priority))
             print(trigger_message)
-    
+
     '''
     def check_five_or_more_observations_in_world(self):
         for user, data in self.tools_usage.items():
@@ -4344,7 +4292,7 @@ class Fetcher:
                         print(trigger_message)
                         data[trigger_key] = True
     '''
-    
+
     def check_five_or_more_observations_in_world(self):
         trigger_name = "check_five_or_more_observations_in_world"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -4380,7 +4328,7 @@ class Fetcher:
                         self.triggers_list.append((trigger_message, user, priority))
                         print(trigger_message)
                         data[trigger_key] = True
-    
+
     '''
     def check_five_chat_messages_in_world(self):
         # Merge co_chat and co_user to get usernames
@@ -4442,7 +4390,7 @@ class Fetcher:
                         print(trigger_message)
                         data[trigger_key] = True
     '''
-    
+
     def check_five_chat_messages_in_world(self):
         trigger_name = "check_five_chat_messages_in_world"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -4521,7 +4469,7 @@ class Fetcher:
                             print(trigger_message)
                             data[trigger_key] = True
     '''
-    
+
     def check_tool_use_counts(self):
         trigger_name = "check_tool_use_counts"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -4574,7 +4522,7 @@ class Fetcher:
                 self.triggers_list.append((trigger_message, user, 1))
                 print(trigger_message)
     '''
-    
+
     def check_over_200_actions_in_2_minutes(self):
         trigger_name = "check_over_200_actions_in_2_minutes"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -4618,7 +4566,7 @@ class Fetcher:
                 self.triggers_list.append((trigger_message, user, 1))
                 print(trigger_message)
     '''
-    
+
     def check_over_200_placed_actions_in_2_minutes(self):
         trigger_name = "check_over_200_placed_actions_in_2_minutes"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -4627,7 +4575,7 @@ class Fetcher:
         filtered_df = self.co_block_with_users[
             (self.co_block_with_users['action'] == 1) &
             (~self.co_block_with_users['username'].str.startswith('#'))
-        ]
+            ]
 
         # Count the place actions per user
         action_counts = filtered_df['username'].value_counts()
@@ -4645,7 +4593,7 @@ class Fetcher:
                 trigger_message = f"{user} has placed over 200 blocks in the last 2 minutes. Category: {category}"
                 self.triggers_list.append((trigger_message, user, priority))
                 print(trigger_message)
-    
+
     '''
     def check_over_200_destroyed_actions_in_2_minutes(self):
         # Filter to include only destroy (0) actions and valid usernames
@@ -4665,7 +4613,7 @@ class Fetcher:
                 self.triggers_list.append((trigger_message, user, 1))
                 print(trigger_message)
     '''
-    
+
     def check_over_200_destroyed_actions_in_2_minutes(self):
         trigger_name = "check_over_200_destroyed_actions_in_2_minutes"
         enabled, priority, category = get_trigger_settings(trigger_name)
@@ -4674,7 +4622,7 @@ class Fetcher:
         filtered_df = self.co_block_with_users[
             (self.co_block_with_users['action'] == 0) &
             (~self.co_block_with_users['username'].str.startswith('#'))
-        ]
+            ]
 
         # Count the destroy actions per user
         action_counts = filtered_df['username'].value_counts()
@@ -4847,7 +4795,7 @@ class Fetcher:
                     self.triggers_list.append((message, user, priority))
                     print(message)
     '''
-    
+
     def check_block_triggers(self):
         from datetime import datetime
         import pytz
@@ -4877,7 +4825,7 @@ class Fetcher:
                 (self.co_block_with_users['action'] == action) &
                 (self.co_block_with_users['time'] >= window_start) &
                 (~self.co_block_with_users['username'].str.startswith("#"))
-            ]
+                ]
 
             if relevant_blocks.empty:
                 continue
@@ -4912,8 +4860,8 @@ class Fetcher:
 
 
 
-    
-    
+
+
     '''
     def check_block_triggers(self):
         current_time = datetime.now(pytz.timezone("America/Chicago")).timestamp()
@@ -5140,7 +5088,7 @@ def launch_trigger_manager():
 
     root.mainloop()
 
-            
+
 # =============================================================================
 # Driver Program (main)
 # =============================================================================
@@ -5184,9 +5132,9 @@ if __name__ == "__main__":
     # add wid to argument parser
     parser.add_argument(
         "--wid",
-        help="Optional: specify a single world ID (wid) to override GLOBAL_WID",
+        help="Specify the world ID (wid)",
         type=int,
-        required=False
+        required=True
     )
 
     args = parser.parse_args()
@@ -5197,86 +5145,82 @@ if __name__ == "__main__":
     # )
     # print("Connected!")
 
-#debug
-print("Fetcher type at runtime:", type(Fetcher))
+    central_tz = pytz.timezone("America/Chicago")
+    fetcher = Fetcher(args.initial_newer_than, args.saveload, args.wid)
+    print(f"\033[93mCONFIG → World ID set to: {args.wid}\033[0m")
 
-central_tz = pytz.timezone("America/Chicago")
-wid_list = [args.wid] if args.wid is not None else GLOBAL_WID
-fetcher = Fetcher(args.initial_newer_than, args.saveload, wid_list)
-print(f"\033[93mCONFIG → World IDs set to: {wid_list}\033[0m")
-    
-# Start Trigger Manager GUI in a separate thread
-gui_thread = threading.Thread(target=launch_trigger_manager)
-gui_thread.daemon = True
-gui_thread.start()
+    # Start Trigger Manager GUI in a separate thread
+    gui_thread = threading.Thread(target=launch_trigger_manager)
+    gui_thread.daemon = True
+    gui_thread.start()
 
-# Start a new thread for updating positions every 3 seconds
-position_thread = threading.Thread(target=fetcher.update_positions_every_3_seconds)
-position_thread.daemon = True  # This makes sure the thread will exit when the main program exits
-position_thread.start()
+    # Start a new thread for updating positions every 3 seconds
+    position_thread = threading.Thread(target=fetcher.update_positions_every_3_seconds)
+    position_thread.daemon = True  # This makes sure the thread will exit when the main program exits
+    position_thread.start()
 
-'''
-while True:
-    fetcher.on_wakeup()
-    
-    print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
-    
-    current_time = datetime.now().timestamp()
-    if (
-        current_time - fetcher.last_trigger_time > 300
-        # current_time - fetcher.last_trigger_time > 9999999 #turn off random trigger during testing
-    ):  # Check if 34 seconds have passed
-        if not fetcher.triggers_list:  # Check if no trigger has been sent recently
-            online_students = fetcher.players["online_user"].tolist()
-            if online_students:
-                random_student = random.choice(online_students)
-                trigger_message = "Random check-in"
-                print(
-                    f"\033[92m \nSending random trigger to '{random_student}' on next wakeup. \033[0m"
-                )
-                fetcher.triggers_list.append((trigger_message, random_student, 10))
-                fetcher.last_trigger_time = (
-                    current_time  # Update the last trigger time
-                )
-    fetcher.save_tools_usage()
-    
-    
-    now = datetime.now(central_tz)
-    
-    print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
-    sleep(10)  # run checks every 10 seconds
-'''
-    
-while True:
-    fetcher.on_wakeup()
-
-    print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
-
-    current_time = datetime.now().timestamp()
-
-    # === Trigger Settings ===
-    random_trigger_name = "check_random_checkin"
-    random_enabled, random_priority, category = get_trigger_settings(random_trigger_name)
-
-    if (
-        current_time - fetcher.last_trigger_time > 300  # 5 minutes
-    ):
-        if not fetcher.triggers_list:  # Only send if no other triggers are pending
-            if random_enabled:
+    '''
+    while True:
+        fetcher.on_wakeup()
+        
+        print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
+        
+        current_time = datetime.now().timestamp()
+        if (
+            current_time - fetcher.last_trigger_time > 300
+            # current_time - fetcher.last_trigger_time > 9999999 #turn off random trigger during testing
+        ):  # Check if 34 seconds have passed
+            if not fetcher.triggers_list:  # Check if no trigger has been sent recently
                 online_students = fetcher.players["online_user"].tolist()
                 if online_students:
                     random_student = random.choice(online_students)
-                    trigger_message = f"Random check-in. Category: {category}"
+                    trigger_message = "Random check-in"
                     print(
                         f"\033[92m \nSending random trigger to '{random_student}' on next wakeup. \033[0m"
                     )
-                    fetcher.triggers_list.append((trigger_message, random_student, random_priority))
-                    fetcher.last_trigger_time = current_time
-            else:
-                print(f"\033[90mSkipping {random_trigger_name} (priority {random_priority}) — disabled in Trigger Manager.\033[0m")
+                    fetcher.triggers_list.append((trigger_message, random_student, 10))
+                    fetcher.last_trigger_time = (
+                        current_time  # Update the last trigger time
+                    )
+        fetcher.save_tools_usage()
+        
+        
+        now = datetime.now(central_tz)
+        
+        print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
+        sleep(10)  # run checks every 10 seconds
+    '''
 
-    fetcher.save_tools_usage()
+    while True:
+        fetcher.on_wakeup()
 
-    now = datetime.now(central_tz)
-    print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
-    sleep(10)
+        print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
+
+        current_time = datetime.now().timestamp()
+
+        # === Trigger Settings ===
+        random_trigger_name = "check_random_checkin"
+        random_enabled, random_priority, category = get_trigger_settings(random_trigger_name)
+
+        if (
+                current_time - fetcher.last_trigger_time > 300  # 5 minutes
+        ):
+            if not fetcher.triggers_list:  # Only send if no other triggers are pending
+                if random_enabled:
+                    online_students = fetcher.players["online_user"].tolist()
+                    if online_students:
+                        random_student = random.choice(online_students)
+                        trigger_message = f"Random check-in. Category: {category}"
+                        print(
+                            f"\033[92m \nSending random trigger to '{random_student}' on next wakeup. \033[0m"
+                        )
+                        fetcher.triggers_list.append((trigger_message, random_student, random_priority))
+                        fetcher.last_trigger_time = current_time
+                else:
+                    print(f"\033[90mSkipping {random_trigger_name} (priority {random_priority}) — disabled in Trigger Manager.\033[0m")
+
+        fetcher.save_tools_usage()
+
+        now = datetime.now(central_tz)
+        print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
+        sleep(10)
