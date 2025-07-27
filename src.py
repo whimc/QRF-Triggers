@@ -2016,7 +2016,7 @@ class Fetcher:
                     message = row["message"]
                     for tool in multi_use_tools + single_use_tools:
                         if f"/{tool}" in message:
-                            self.tools_usage[user]["tool_use_count"] += 1
+                            self.tools_usage[user]["tool_use_count"] = self.tools_usage[user].get("tool_use_count", 0) + 1
                             tool_key = f"{tool}_{current_world}"
                             self.tools_usage[user].setdefault(tool_key, 0)
                             self.tools_usage[user][tool_key] += 1
