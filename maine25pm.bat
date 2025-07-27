@@ -16,6 +16,6 @@ echo Installing/updating dependencies...
 pip install -r requirements.txt
 
 REM Run the script
-python src.py --initial-newer-than "2025-07-27 8:00:00" --saveload Umaine2025am --wid 133
+python src.py --initial-newer-than "2025-07-27 12:30:00" --saveload umaine2025pm --wid 133
 
 pause
