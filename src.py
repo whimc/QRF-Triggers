@@ -8,7 +8,7 @@
 #133 = Umaine25am
 #134 = Umaine25pm
 
-GLOBAL_WID = [133, 134, 145]
+GLOBAL_WID = [134]
 
 # =============================================================================
 # Imports
@@ -2244,6 +2244,7 @@ class Fetcher:
 
         for user, data in self.tools_usage.items():
             worlds_visited = data["worlds_visited"]
+            print(data)
             current_world = data["current_world"]
             world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
 
