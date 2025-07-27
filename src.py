@@ -33,6 +33,31 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import threading
 from collections import defaultdict
 
+from datetime import datetime, timedelta
+
+# =============================================================================
+# Trigger Manager
+# =============================================================================
+
+def is_trigger_enabled(name): # @Luc, @Geph: This is a deprecated fn but please keep for now it helps me debug
+    try:
+        with open("trigger_config.json") as f:
+            config = json.load(f)
+            return config.get(name, True)
+    except:
+        return True  # Default to enabled if config is missing
+        
+def get_trigger_settings(trigger_name):
+    with open("trigger_config.json", "r") as f:
+        config = json.load(f)
+    settings = config.get(trigger_name, {"enabled": True, "priority": 1})
+    return settings["enabled"], settings["priority"], settings["category"]
+
+def get_trigger_field(trigger_name, field_name, default=None):
+    with open("trigger_config.json", "r") as f:
+        config = json.load(f)
+    return config.get(trigger_name, {}).get(field_name, default)    
+
 # =============================================================================
 # Database Connection
 # =============================================================================
@@ -105,9 +130,51 @@ SOCKET = None
 # SQL Queries
 # =============================================================================
 
+
 GET_TABLES = """
-SHOW TABLES;
+SELECT * FROM co_block
+ORDER BY rowid DESC
+LIMIT 20;
 """
+
+GET_CO_BLOCKS = f"""
+SELECT * FROM co_block
+WHERE time > UNIX_TIMESTAMP() - 600
+ORDER BY time ASC;
+"""
+
+GET_AIRCLICKS = """
+SELECT *
+FROM whimc_action_physical
+WHERE type = 'AIR CLICK'
+  AND time > (UNIX_TIMESTAMP(current_timestamp) * 1000) - 30000
+ORDER BY time DESC;
+"""
+
+GET_VISITS_TO_UNOWNED_REGION = """
+SELECT *
+FROM whimc_player_region_events
+WHERE time > UNIX_TIMESTAMP(current_timestamp) - 30
+ORDER BY time DESC;
+"""
+
+
+
+'''
+GET_TABLES = """
+SELECT *
+FROM co_block
+ORDER BY time DESC
+LIMIT 20;
+"""
+'''
+
+GET_DEATHS = """
+SELECT uuid, username, world, x, y, z, time, type
+FROM whimc_action_physical
+WHERE type = 'DEATH';
+"""
+
 
 '''
 GET_PEEK = """
@@ -313,7 +380,8 @@ def send_trigger(trigger_name: str, username: str, priority: int):
         stopwatch = time()
         response = SOCKET.recv()
         print(f"Received response after {time() - stopwatch:.3f} seconds")
-        print(response)
+        # print(response)
+        print(response[:30] + "..." if len(response) > 30 else response)
 
         stopwatch = time()
         SOCKET.close()
@@ -345,7 +413,13 @@ class Fetcher:
         "co_command_with_worlds": GET_CO_COMMAND_WITH_WORLDS,
         "co_block_with_users": GET_CO_BLOCK_WITH_USERS,
         "get_wid_for_world": GET_WID_FOR_WORLD,
+        "get_tables": GET_TABLES,
+        "get_deaths": GET_DEATHS,
+        "get_co_blocks": GET_CO_BLOCKS,
+        "get_airclicks": GET_AIRCLICKS,
+        "get_visits_to_unowned_region": GET_VISITS_TO_UNOWNED_REGION,
     }
+
 
     def load_data(self):
         for key, query in Fetcher.CMDS.items():
@@ -358,7 +432,9 @@ class Fetcher:
         # self.players = get_data(GET_ONLINE_PLAYERS)
         self.wid = wid
         self.block_triggers_df = pd.read_csv('BlockBasedTriggers.csv')
-        
+        # indicate a start-time of script
+        self.start_time = datetime.now(central_tz).timestamp()
+              
 
         # Mostly for type hinting
         self.commands = pd.DataFrame()
@@ -373,6 +449,13 @@ class Fetcher:
         self.co_chat_with_worlds = pd.DataFrame()
         self.co_block_with_users = pd.DataFrame()
         self.get_wid_for_world = pd.DataFrame()
+        self.get_co_blocks = pd.DataFrame()
+        self.get_airclicks = pd.DataFrame()
+        self.get_visits_to_unowned_region = pd.DataFrame()
+        
+        
+        # Luc added
+        self.prev_trig_time = pd.DataFrame(columns=['User', 'Material', 'Action', 'H_or_l', 'Time'])
         
         self.load_data()
 
@@ -390,8 +473,15 @@ class Fetcher:
         else:
             self.tools_usage = {}
 
+        self.initialize_tool_usage()
         self.observations_record = {}
         self.pair_durations = defaultdict(int)
+        
+        self.lastTriggerTimePerUser = {}
+        
+        self.get_deaths = pd.DataFrame()
+        self.block_breaks_already_triggered = set()
+        self.unowned_region_already_triggered = set()
 
     def save_tools_usage(self):
         if self.saveload_file:
@@ -413,10 +503,12 @@ class Fetcher:
                 print ("WID")
                 print (self.wid)
             '''
-            if key == "get_wid_for_world":
-                print ("PEEK")
+            
+            if key == "get_visits_to_unowned_region":
+                print (f"PEEK: {key}")
                 print (df)
-                
+            
+             
             setattr(self, key, df)
 
         self.save_tools_usage()  # save after fetching the data
@@ -585,6 +677,21 @@ class Fetcher:
         self.check_over_200_destroyed_actions_in_2_minutes()
         self.check_block_triggers()
         
+        # new triggers for new summer camp
+        self.achieves_death()
+        self.check_block_breaks_by_others()
+        self.check_used_help_command()
+        self.check_visit_unmarked_pois()
+        self.check_world_exploration()
+        self.check_multiple_npc_visits()
+        self.check_tool_inspiration_generic()
+        self.check_tool_inspiration_specific()
+        self.check_advanced_tool_use()
+        self.check_high_chat_volume()
+        self.check_airclick_burst()
+        self.check_breaks_own_block()
+        self.check_visits_to_unowned_region()
+        
         # print(f"TOOLS & OBSERVATION USAGE (SAVED): \n{self.tools_usage}\n")
 
         # Send all triggers
@@ -611,6 +718,109 @@ class Fetcher:
         # triggers.append(trigger)
 
         return self.triggers_list
+
+    def achieves_death(self):
+        trigger_name = "achieves_death"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        current_time_ms = int(datetime.now(pytz.utc).timestamp() * 1000)
+        cutoff_time_ms = current_time_ms - 30000  # last 30 seconds
+
+        if self.get_deaths.empty:
+            print("\033[90mNo death logs available in get_deaths.\033[0m")
+            return
+
+        recent_deaths = self.get_deaths[self.get_deaths["time"] >= cutoff_time_ms]
+
+        for _, row in recent_deaths.iterrows():
+            username = row["username"]
+            timestamp = row["time"]
+
+            dt_str = datetime.fromtimestamp(timestamp / 1000, pytz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            trigger_message = f"{username} achieved death in '{row['world']}' at ({row['x']}, {row['y']}, {row['z']}) — {dt_str} Category: Actions A2"
+            self.triggers_list.append((trigger_message, username, priority))
+            print(trigger_message)
+
+    def check_visits_to_unowned_region(self):
+        trigger_name = "check_visits_to_unowned_region"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        df = self.get_visits_to_unowned_region
+        if df.empty:
+            print(f"\033[90m{trigger_name}: No region events found.\033[0m")
+            return
+
+        already_triggered = self.unowned_region_already_triggered
+
+        for _, row in df.iterrows():
+            if row['trigger'] != 'VISIT':
+                continue
+
+            username = row['username'].lower()
+            members = [m.strip().lower() for m in (row['region_members'] or '').split(',')]
+
+            if username in members:
+                continue  # They’re part of the region, so ignore
+
+            uid = row['uuid']
+            if uid in already_triggered:
+                continue  # Skip if already triggered in this session
+
+            msg = (
+                f"{row['username']} visited region '{row['region']}' owned by {row['region_members']}. "
+                f"Category: {category}"
+            )
+            self.triggers_list.append((msg, row['username'], priority))
+            print(msg)
+            already_triggered.add(uid)
+
+
+
+
+    def check_airclick_burst(self):
+        trigger_name = "check_airclick_burst"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        if self.get_airclicks.empty:
+            print("\033[90mNo airclick logs available in get_airclicks.\033[0m")
+            return
+
+        current_time_ms = int(datetime.now(pytz.utc).timestamp() * 1000)
+        cutoff_time_ms = current_time_ms - 20000  # last 20 seconds
+
+        recent_clicks = self.get_airclicks[self.get_airclicks["time"] >= cutoff_time_ms]
+
+        if recent_clicks.empty:
+            print("\033[90mNo recent airclicks in the last 20s.\033[0m")
+            return
+
+        grouped = recent_clicks.groupby("username")
+
+        for username, group in grouped:
+            click_count = len(group)
+
+            click_threshold = get_trigger_field(trigger_name, "click_threshold", 5)
+            if click_count > click_threshold:
+                dt_str = datetime.fromtimestamp(group["time"].max() / 1000, pytz.utc).strftime("%H:%M:%S UTC")
+                message = f"{username} made {click_count} AIR CLICKs in the last 20s (latest at {dt_str}). Category: {category}"
+                self.triggers_list.append((message, username, priority))
+                print(message)
+            else:
+                print(f"{username} had {click_count} airclicks — below threshold.")
+
+
 
     # =============================================================================
     # Helper functions for trigger dictionaries / dataframes
@@ -668,6 +878,7 @@ class Fetcher:
         ]
 
         # handle observations
+        '''
         for _, row in self.observations.iterrows():
             user = row["username"]
             world = row["world"]
@@ -722,7 +933,52 @@ class Fetcher:
                                         5,
                                     )
                                 )
+        '''
+        
+        for _, row in self.observations.iterrows():
+            user = row["username"]
+            world = row["world"]
+            x = row["x"]
+            z = row["z"]
+            observation_text = row["observation"]
 
+            trigger_name = "observation_near_poi"
+            enabled, priority, category = get_trigger_settings(trigger_name)
+
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            for object_type, objects in world_coordinates_dictionary.get(world, {}).items():
+                if object_type == "Global":
+                    continue
+
+                for object_name, details in objects.items():
+                    similarity = SequenceMatcher(None, observation_text, object_name).ratio()
+
+                    if "range" in details and self.is_point_inside_space(x, z, details["range"]):
+                        trigger_message = (
+                            f"{user} made an observation near {object_name} in {world}. "
+                            f"Similarity score: {similarity:.2f}. Category: {category}"
+                        )
+                        print(trigger_message)
+                        self.triggers_list.append((trigger_message, user, priority))
+
+                    elif "x" in details and "z" in details:
+                        place_x, place_z = details["x"], details["z"]
+                        if (
+                            place_x is not None and place_z is not None and
+                            x is not None and z is not None and
+                            abs(x - place_x) + abs(z - place_z) <= 10
+                        ):
+                            trigger_message = (
+                                f"{user} made an observation near {object_name} in {world}. "
+                                f"Similarity score: {similarity:.2f}. Category: {category}"
+                            )
+                            print(trigger_message)
+                            self.triggers_list.append((trigger_message, user, priority))
+
+        '''
         # handle tool usage
         for _, cmd_row in self.commands.iterrows():
             user = cmd_row["username"]
@@ -814,7 +1070,79 @@ class Fetcher:
                                 )
                             )
                             break  # Exit after finding and processing the first set of global actions
+        '''
+        
+        for _, cmd_row in self.commands.iterrows():
+            user = cmd_row["username"]
+            world = cmd_row["world"]
+            x = cmd_row["x"]
+            z = cmd_row["z"]
+            message = cmd_row["message"].strip()
 
+            used_tool = None
+            for tool in slash_commands_in_expected_actions:
+                if message.startswith(f"/{tool}"):
+                    used_tool = tool
+                    break
+
+            if not used_tool:
+                continue
+
+            trigger_name = "tool_use_near_expected_action"
+            enabled, priority, category = get_trigger_settings(trigger_name)
+
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            tool_triggered = False
+            for object_type, objects in world_coordinates_dictionary.get(world, {}).items():
+                if object_type == "Global":
+                    continue
+
+                for object_name, details in objects.items():
+                    expected_actions = details.get("Expected Action", [])
+
+                    if (
+                        "range" in details and self.is_point_inside_space(x, z, details["range"])
+                        and f"/{used_tool}" in expected_actions
+                    ):
+                        trigger_message = (
+                            f"{user} used tool {used_tool} near {object_name} in {world}. "
+                            f"Category: {category}"
+                        )
+                        print(trigger_message)
+                        self.triggers_list.append((trigger_message, user, priority))
+                        tool_triggered = True
+
+                    elif (
+                        "x" in details and "z" in details and
+                        f"/{used_tool}" in expected_actions
+                    ):
+                        place_x, place_z = details["x"], details["z"]
+                        if abs(x - place_x) + abs(z - place_z) <= 10:
+                            trigger_message = (
+                                f"{user} used tool {used_tool} near {object_name} in {world}. "
+                                f"Category: {category}"
+                            )
+                            print(trigger_message)
+                            self.triggers_list.append((trigger_message, user, priority))
+                            tool_triggered = True
+
+            if not tool_triggered:
+                global_actions = world_coordinates_dictionary.get(world, {}).get("Global", {})
+                for _, details in global_actions.items():
+                    expected_actions = details.get("Expected Action", [])
+                    if f"/{used_tool}" in expected_actions:
+                        trigger_message = (
+                            f"{user} used tool {used_tool} in {world} (Global action). "
+                            f"Category: {category}"
+                        )
+                        print(trigger_message)
+                        self.triggers_list.append((trigger_message, user, priority))
+                        break
+
+        
     # Rachel Zhou's code edited to work with .self
     def define_polygon_boundary(self, range_str):
         if not range_str:
@@ -848,6 +1176,7 @@ class Fetcher:
     # /For Checking Important Places
     # =============================================================================
 
+    '''
     def check_mynoa_observations(self):
         for _, player_row in self.players.iterrows():
             user = player_row["online_user"]
@@ -895,6 +1224,49 @@ class Fetcher:
             else:
                 self.tools_usage[user]["mynoa_start_time"] = None
                 self.tools_usage[user]["mynoa_trigger_fired"] = False
+    '''
+    
+    def check_mynoa_observations(self):
+        trigger_name = "check_mynoa_observations"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        for _, player_row in self.players.iterrows():
+            user = player_row["online_user"]
+            current_world = player_row["world"]
+            position_time = player_row["position_time"]
+
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            if user not in self.tools_usage:
+                self.tools_usage[user] = {
+                    "last_observation_time": position_time,
+                    "mynoa_start_time": None,
+                    "mynoa_trigger_fired": False,
+                }
+
+            if current_world.startswith("Mynoa"):
+                if self.tools_usage[user].get("mynoa_start_time") is None:
+                    self.tools_usage[user]["mynoa_start_time"] = position_time
+                    self.tools_usage[user]["mynoa_trigger_fired"] = False
+                else:
+                    time_in_mynoa = position_time - self.tools_usage[user]["mynoa_start_time"]
+                    if time_in_mynoa >= 25 * 60 and not self.tools_usage[user]["mynoa_trigger_fired"]:
+                        observations_in_mynoa = (
+                            self.tools_usage[user]
+                            .get("world_observation_counts", {})
+                            .get(current_world, 0)
+                        )
+                        if observations_in_mynoa == 0:
+                            trigger_message = f"{user} has been in {current_world} for more than 25 minutes without making an observation. Category: {category}"
+                            print(trigger_message)
+                            self.triggers_list.append((trigger_message, user, priority))
+                            self.tools_usage[user]["mynoa_trigger_fired"] = True
+            else:
+                self.tools_usage[user]["mynoa_start_time"] = None
+                self.tools_usage[user]["mynoa_trigger_fired"] = False
+
 
     def update_observation_usage(self):
         central_tz = pytz.timezone("America/Chicago")
@@ -922,6 +1294,7 @@ class Fetcher:
             self.observations_record[world].append((x, z, user, observation_text))
 
             # Check for nearby observations
+            '''
             for obs_x, obs_z, obs_user, obs_text in self.observations_record[world]:
                 distance = abs(x - obs_x) + abs(z - obs_z)  # Manhattan distance
                 if 0 < distance < 10:
@@ -932,7 +1305,32 @@ class Fetcher:
                     print(trigger_message)
                     self.triggers_list.append((trigger_message, user, 5))
                     break  # Exit after finding one nearby observation to avoid multiple triggers for the same event
+            '''
+            
+            # Check for nearby observations
+            for obs_x, obs_z, obs_user, obs_text in self.observations_record[world]:
+                distance = abs(x - obs_x) + abs(z - obs_z)  # Manhattan distance
+                if 0 < distance < 10:
+                    similarity = difflib.SequenceMatcher(None, observation_text, obs_text).ratio()
 
+                    # Trigger Manager Integration
+                    trigger_name = "check_nearby_similar_observation"
+                    enabled, priority, category = get_trigger_settings(trigger_name)
+
+                    if not enabled:
+                        print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                        break
+
+                    print(f"obs distance is: {distance}, similarity is: {similarity:.2f}")
+                    trigger_message = (
+                        f"{user} made an observation near another observation in {world}. "
+                        f"Similarity: {similarity:.2f}. Category: {category}"
+                    )
+                    print(trigger_message)
+                    self.triggers_list.append((trigger_message, user, priority))
+                    break  # Exit after finding one nearby observation to avoid multiple triggers
+
+            
             if user not in self.tools_usage:
                 self.tools_usage[user] = {
                     "worlds_visited": [world],
@@ -969,7 +1367,8 @@ class Fetcher:
                 trigger_message = f"{user} made an observation in {world}."
                 self.triggers_list.append((trigger_message, user, 2))
                 print(trigger_message)
-
+        
+        '''
         for user, data in self.tools_usage.items():
             worlds_visited = data["worlds_visited"]
             current_world = data["current_world"]
@@ -1009,92 +1408,412 @@ class Fetcher:
                     print(f"{user} has made 5 observations in {current_world}.")
                     self.triggers_list.append((f"{user} has made 5 observations in {current_world}", user, 7))
                     data[high_obs_trigger_key] = True
+        '''
+        
+        for user, data in self.tools_usage.items():
+            worlds_visited = data["worlds_visited"]
+            current_world = data["current_world"]
+            world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
 
+            # === Trigger: no_observations_by_third_world ===
+            trigger_name = "no_observations_by_third_world"
+            enabled, priority, category = get_trigger_settings(trigger_name)
+            if enabled and len(worlds_visited) >= 3:
+                trigger_key = f"no_observations_since_third_{current_world}"
+                if not data.get(trigger_key, False):
+                    if len(worlds_visited) == 3 and world_observation_count == 0:
+                        trigger_message = f"{user} has not made any observations by the third world. Category: {category}"
+                        print(trigger_message)
+                        self.triggers_list.append((trigger_message, user, priority))
+                        data[trigger_key] = True
+                    elif len(worlds_visited) > 3 and world_observation_count == 0:
+                        trigger_message = f"{user} has visited {len(worlds_visited)} worlds without making any observations. Category: {category}"
+                        print(trigger_message)
+                        self.triggers_list.append((trigger_message, user, priority))
+                        data[trigger_key] = True
+            elif not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+
+            # === Trigger: high_observation_count ===
+            trigger_name = "high_observation_count"
+            enabled, priority, category = get_trigger_settings(trigger_name)
+            high_obs_trigger_key = f"high_observations_{current_world}"
+            if enabled:
+                if len(worlds_visited) <= 3 and world_observation_count > 10:
+                    if not data.get(high_obs_trigger_key, False):
+                        trigger_message = f"{user} has made more than 10 observations in {current_world}. Category: {category}"
+                        print(trigger_message)
+                        self.triggers_list.append((trigger_message, user, priority))
+                        data[high_obs_trigger_key] = True
+                elif len(worlds_visited) > 3 and world_observation_count > 5:
+                    if not data.get(high_obs_trigger_key, False):
+                        trigger_message = f"{user} has made more than 5 observations in {current_world} after visiting 3 worlds. Category: {category}"
+                        print(trigger_message)
+                        self.triggers_list.append((trigger_message, user, priority))
+                        data[high_obs_trigger_key] = True
+            else:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+
+            # === Trigger: reached_5_observations_in_world ===
+            trigger_name = "reached_5_observations_in_world"
+            enabled, priority, category = get_trigger_settings(trigger_name)
+            if enabled and len(worlds_visited) > 0 and world_observation_count >= 5:
+                if not data.get(high_obs_trigger_key, False):  # reuse key for simplicity
+                    trigger_message = f"{user} has made 5 observations in {current_world}. Category: {category}"
+                    print(trigger_message)
+                    self.triggers_list.append((trigger_message, user, priority))
+                    data[high_obs_trigger_key] = True
+            elif not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+
+
+
+    def initialize_tool_usage(self):
+        # Get the current time in the America/Chicago timezone
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()  # Get the current Unix timestamp
+        
+        # Initialize the last observation and tool usage times for all users
+        for user in self.tools_usage.keys():
+            # Set both the observation and tool use time to the current time
+            self.tools_usage[user]["last_observation_time"] = current_time
+            self.tools_usage[user]["last_tool_use_time"] = current_time
+            
+            # Log the initialization
+            print(f"Initialized last_observation_time and last_tool_use_time for {user} to current time.")
+
+
+    '''
     def check_no_observations_last_20_minutes(self):
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()
-        
+
         time_dilation = 0
 
-        # ====================================================
-        # //TRIGGER PARAM: check_last_tool_use_over_20_minutes
-        # 20 * 60 below (line 1023) means 20 minutes. Change 20 to any number of minutes you want the threshold to be.
-        # ====================================================
-        
+        # Capture the start time when the script is initialized
+        # Assume `self.start_time` was initialized when the script started
         for user, data in self.tools_usage.items():
             last_observation_time = data.get("last_observation_time", 0)
-            if current_time - last_observation_time + time_dilation > 20 * 60:  # 20 minutes
-                
-                '''
-                print("current_time", current_time)
-                print("last_observation_time", last_observation_time)
-                print("current_time - last_observation_time + time_dilation", current_time - last_observation_time + time_dilation)
-                '''
-                
-                trigger_message = f"{user} has not made any observations in the last 20 minutes."
-                self.triggers_list.append((trigger_message, user, 1))
-                print(trigger_message)
-                # Reset last_observation_time to 1 minute before the current time
-                # self.tools_usage[user]["last_observation_time"] = current_time + time_dilation - 10  # 1 minute breathing time before next trigger
-                self.tools_usage[user]["last_observation_time"] = current_time + time_dilation  # 1 minute breathing time before next trigger
-                
-                # print("last observation time changed to", self.tools_usage[user]["last_observation_time"], "with breathing time of 1 minute")
-                
+            
+            # Only proceed if the last observation time was after the script started
+            if last_observation_time > self.start_time:
+                if current_time - last_observation_time + time_dilation > 1 * 60:  # 20 minutes
+                    
+                    trigger_message = f"{user} has not made any observations in the last 20 minutes."
+                    self.triggers_list.append((trigger_message, user, 1))
+                    print(trigger_message)
+                    
+                    # Reset last_observation_time to current_time for the next cycle
+                    self.tools_usage[user]["last_observation_time"] = current_time + time_dilation
+                    
             else:
-                print ()
-                '''
-                print("no trigger", user)
-                print("current_time", current_time)
-                print("last_observation_time", last_observation_time)
-                print("current_time - last_observation_time + time_dilation", current_time - last_observation_time + time_dilation)
-                '''
+                print(f"Skipping user {user} because their last observation was before the script started.")
+    '''
+
+    def check_high_chat_volume(self):
+        trigger_name = "check_high_chat_volume"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        if self.co_chat.empty or self.co_user.empty:
+            print(f"\033[90m{trigger_name}: Chat or user data unavailable.\033[0m")
+            return
+
+        chat_threshold = get_trigger_field(trigger_name, "check_high_chat_volume_threshold", 5)
+        minute_window = get_trigger_field(trigger_name, "check_high_chat_volume_minutes", 2)
+
+        # Merge to get readable usernames
+        merged_df = pd.merge(self.co_chat, self.co_user, left_on='user', right_on='rowid')
+
+        # Convert UNIX timestamp to datetime
+        central_tz = pytz.timezone("America/Chicago")
+        now = datetime.now(central_tz)
+        merged_df["parsed_time"] = pd.to_datetime(merged_df["time_x"], unit='s', utc=True).dt.tz_convert(central_tz)
+
+        for username, user_df in merged_df.groupby("user_y"):
+            recent_entries = user_df[user_df["parsed_time"] >= now - timedelta(minutes=minute_window)]
+            if len(recent_entries) >= chat_threshold:
+                msg = f"{username} made {len(recent_entries)} chat entries in the last {minute_window} minutes. Category: {category}"
+                self.triggers_list.append((msg, username, priority))
+                print(msg)
+
+
+
+
+
+
+    def check_used_help_command(self):
+        trigger_name = "check_used_help_command"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        df = getattr(self, "commands", pd.DataFrame())  # <-- this is where your /help logs are
+        if df.empty:
+            print(f"\033[90m{trigger_name}: No command data available.\033[0m")
+            return
+
+        help_uses = df[df["message"].str.lower() == "/help"]
+
+        if help_uses.empty:
+            print(f"\033[90m{trigger_name}: No /help command found in this slice.\033[0m")
+            return
+
+        if not hasattr(self, "help_triggered_users"):
+            self.help_triggered_users = set()
+
+        for _, row in help_uses.iterrows():
+            username = row["username"]
+
+            if username in self.help_triggered_users:
+                continue
+
+            msg = f"{username} used the /help command. Category: {category}"
+            self.triggers_list.append((msg, username, priority))
+            print(msg)
+
+            self.help_triggered_users.add(username)
+
+
+    def check_breaks_own_block(self):
+        trigger_name = "check_breaks_own_block"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        df = getattr(self, "get_co_blocks", pd.DataFrame())
+        if df.empty:
+            print(f"\033[90m{trigger_name}: No co_block data available.\033[0m")
+            return
+
+        already_triggered = self.block_breaks_already_triggered
+
+        placements_by_user = defaultdict(dict)  # user → coord → placement time
+        self_breaks_by_user = defaultdict(list)
+
+        for _, row in df.iterrows():
+            coord = (row['wid'], row['x'], row['y'], row['z'])
+            t = row['time']
+            uid = row['user']
+            action = row['action']
+
+            if action == 1:
+                placements_by_user[uid][coord] = t
+            elif action == 0 and coord in placements_by_user[uid]:
+                # The user broke a block they placed earlier
+                self_breaks_by_user[uid].append(t)
+
+        for uid, timestamps in self_breaks_by_user.items():
+            if uid in already_triggered:
+                continue
+
+            timestamps.sort()
+            start = 0
+            for end in range(len(timestamps)):
+                while timestamps[end] - timestamps[start] > 30:
+                    start += 1
+                if end - start + 1 >= 20:
+                    username = (
+                        self.co_user[self.co_user["rowid"] == uid]["user"].values[0]
+                        if uid in self.co_user["rowid"].values
+                        else f"User {uid}"
+                    )
+                    msg = (
+                        f"{username} broke {end - start + 1} of their own placed blocks within 30 seconds. "
+                        f"Category: {category}"
+                    )
+                    self.triggers_list.append((msg, username, priority))
+                    print(msg)
+
+                    already_triggered.add(uid)
+                    break
+
+
+    def check_block_breaks_by_others(self):
+        trigger_name = "check_block_breaks_by_others"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        df = getattr(self, "get_co_blocks", pd.DataFrame())
+        if df.empty:
+            print(f"\033[90m{trigger_name}: No co_block data available.\033[0m")
+            return
+
+        placements = {}  # coord → (user, time)
+        break_events = defaultdict(list)
+        already_triggered = self.block_breaks_already_triggered
+
+        for _, row in df.iterrows():
+            coord = (row['wid'], row['x'], row['y'], row['z'])
+            t = row['time']
+            uid = row['user']
+            action = row['action']
+
+            if action == 1:
+                placements[coord] = (uid, t)
+            elif action == 0:
+                if coord in placements:
+                    placer_uid, placed_time = placements[coord]
+                    if placer_uid != uid:
+                        break_events[uid].append(t)
+
+        for uid, timestamps in break_events.items():
+            if uid in already_triggered:
+                continue  # Skip if already triggered
+
+            timestamps.sort()
+            start = 0
+            for end in range(len(timestamps)):
+                while timestamps[end] - timestamps[start] > 30:
+                    start += 1
+                if end - start + 1 >= 20:
+                    username = (
+                        self.co_user[self.co_user["rowid"] == uid]["user"].values[0]
+                        if uid in self.co_user["rowid"].values
+                        else f"User {uid}"
+                    )
+                    msg = (
+                        f"{username} destroyed {end - start + 1} blocks placed by others within 30 seconds. "
+                        f"Category: {category}"
+                    )
+                    self.triggers_list.append((msg, username, priority))
+                    print(msg)
+
+                    already_triggered.add(uid)
+                    break  # Only fire once per user per 10-min slice
+
+
                 
+    def check_no_observations_last_20_minutes(self):
+    
+        trigger_name = "check_no_observations_last_20_minutes"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for user, data in self.tools_usage.items():
+
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                return
+
+            last_observation_time = data.get("last_observation_time", self.start_time)
+
+            # Check if the 20-minute condition is met
+            if current_time - last_observation_time > 20 * 60:  # 20 minutes
+                last_trigger_time = self.lastTriggerTimePerUser.get(user, 0)
+
+                # Ensure cooldown is respected
+                if current_time - last_trigger_time > 20 * 60:  # 20-minute cooldown
+                    trigger_message = f"{user} has not made any observations in the last 20 minutes. Category: {category}"
+                    # self.triggers_list.append((trigger_message, user, 1))
+                    self.triggers_list.append((trigger_message, user, priority))
+                    print(trigger_message)
+
+                    # Update last trigger time
+                    self.lastTriggerTimePerUser[user] = current_time
+                else:
+                    print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user}. — Cooldown Active.\033[0m")    
+    
+    '''
     def check_last_tool_use_over_20_minutes(self):
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()
-        
+
         time_dilation = 0
 
-        # ====================================================
-        # //TRIGGER PARAM: check_last_tool_use_over_20_minutes
-        # 20 * 60 below (line 1023) means 20 minutes. Change 20 to any number of minutes you want the threshold to be.
-        # ====================================================
-
+        # Capture the start time when the script is initialized
+        # Assume `self.start_time` was initialized when the script started
         for user, data in self.tools_usage.items():
             last_tool_use_time = data.get("last_tool_use_time", 0)
-            if current_time - last_tool_use_time + time_dilation > 20 * 60:  # 20 minutes
-                '''
-                print("current_time", current_time)
-                print("last_tool_use_time", last_tool_use_time)
-                print("current_time - last_tool_use_time + time_dilation", current_time - last_tool_use_time + time_dilation)
-                '''
-                
-                trigger_message = f"{user} has not used any tools in the last 20 minutes."
-                self.triggers_list.append((trigger_message, user, 1))
-                print(trigger_message)
-                # Reset last_tool_use_time to 1 minute before the current time
-                # self.tools_usage[user]["last_tool_use_time"] = current_time + time_dilation - 60  # 1 minute breathing time before next trigger
-                self.tools_usage[user]["last_tool_use_time"] = current_time + time_dilation  # 1 minute breathing time before next trigger
-                
-                # print(f"last tool use time changed to {self.tools_usage[user]['last_tool_use_time']} with breathing time of 1 minute")
-                
+            
+            # Only proceed if the last tool use time was after the script started
+            if last_tool_use_time > self.start_time:
+                if current_time - last_tool_use_time + time_dilation > 20 * 60:  # 20 minutes
+                    
+                    trigger_message = f"{user} has not used any tools in the last 20 minutes."
+                    self.triggers_list.append((trigger_message, user, 1))
+                    print(trigger_message)
+                    
+                    # Reset last_tool_use_time to current_time for the next cycle
+                    self.tools_usage[user]["last_tool_use_time"] = current_time + time_dilation
+                    
             else:
-                print()
-                '''
-                print("no trigger", user)
-                print("current_time", current_time)
-                print("last_tool_use_time", last_tool_use_time)
-                print("current_time - last_tool_use_time + time_dilation", current_time - last_tool_use_time + time_dilation)
-                '''
-             
+                print(f"Skipping user {user} because their last tool use was before the script started.")
+    '''
+    
+    '''
+    def check_last_tool_use_over_20_minutes(self):
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for user, data in self.tools_usage.items():
+            last_tool_use_time = data.get("last_tool_use_time", self.start_time)
+
+            # Check if the 20-minute condition is met
+            if current_time - last_tool_use_time > 20 * 60:  # 20 minutes
+                last_trigger_time = self.lastTriggerTimePerUser.get(user, 0)
+
+                # Ensure cooldown is respected
+                if current_time - last_trigger_time > 20 * 60:  # 20-minute cooldown
+                    trigger_message = f"{user} has not used any tools in the last 20 minutes."
+                    self.triggers_list.append((trigger_message, user, 1))
+                    print(trigger_message)
+
+                    # Update last trigger time
+                    self.lastTriggerTimePerUser[user] = current_time
+                else:
+                    print(f"(Last Tool Use) Cooldown active for {user}. Trigger skipped.")
+    '''
+    
+    def check_last_tool_use_over_20_minutes(self):
+        trigger_name = "check_last_tool_use_over_20_minutes"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+
+
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for user, data in self.tools_usage.items():
+        
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                return
+                
+            last_tool_use_time = data.get("last_tool_use_time", self.start_time)
+
+            if current_time - last_tool_use_time > 20 * 60:
+                last_trigger_time = self.lastTriggerTimePerUser.get(user, 0)
+
+                if current_time - last_trigger_time > 20 * 60:
+                    trigger_message = f"{user} has not used any tools in the last 20 minutes. Category: {category}"
+                    self.triggers_list.append((trigger_message, user, priority))
+                    print(trigger_message)
+                    self.lastTriggerTimePerUser[user] = current_time
+                else:
+                    print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user}. — Cooldown Active.\033[0m")  
+
+
+
+    '''         
     def check_3_chat_entries_in_1_minute(self):
         # Merge co_chat and co_user to get usernames
         merged_df = pd.merge(self.co_chat, self.co_user, left_on='user', right_on='rowid')
 
-        '''
-        print(merged_df.head())
-        print(merged_df.columns)
-        '''
+
 
         # Get the current time in the correct timezone
         central_tz = pytz.timezone("America/Chicago")
@@ -1112,7 +1831,38 @@ class Fetcher:
                 trigger_message = f"{username} has made 3 or more chat entries in the last minute."
                 self.triggers_list.append((trigger_message, username, 7))
                 print(trigger_message)
+    '''
+    
+    def check_3_chat_entries_in_1_minute(self):
+        trigger_name = "check_3_chat_entries_in_1_minute"
+        enabled, priority, category = get_trigger_settings(trigger_name)
 
+
+        # Merge co_chat and co_user to get usernames
+        merged_df = pd.merge(self.co_chat, self.co_user, left_on='user', right_on='rowid')
+
+        # Get the current time in the correct timezone
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        # Track chat entries for each user
+        chat_count = merged_df['user_x'].value_counts()  # Adjusted column name
+
+        for user, count in chat_count.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                return
+
+            if count >= 3:
+                # Fetch the username
+                username = merged_df[merged_df['user_x'] == user]['user_y'].iloc[0]  # Adjusted column name
+
+                # Create a trigger message
+                trigger_message = f"{username} has made 3 or more chat entries in the last minute. Category: {category}"
+                self.triggers_list.append((trigger_message, username, priority))
+                print(trigger_message)
+
+    '''
     def check_3_observations_in_2_minutes(self):
         central_tz = pytz.timezone("America/Chicago")
         current_time = datetime.now(central_tz).timestamp()
@@ -1124,7 +1874,29 @@ class Fetcher:
                 print(trigger_message)
                 # Clear recent observations to avoid repeated triggers
                 self.tools_usage[user]["recent_observations"] = []
+    '''
+    
+    def check_3_observations_in_2_minutes(self):
+        trigger_name = "check_3_observations_in_2_minutes"
+        enabled, priority, category = get_trigger_settings(trigger_name)
 
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for user, data in self.tools_usage.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            recent_observations = data.get("recent_observations", [])
+            if len(recent_observations) >= 3:
+                trigger_message = f"{user} has made 3 observations in the last 2 minutes. Category: {category}"
+                self.triggers_list.append((trigger_message, user, priority))
+                print(trigger_message)
+                # Clear recent observations to avoid repeated triggers
+                self.tools_usage[user]["recent_observations"] = []
+
+    
     def update_tool_usage(self):
         # Define lists of tools for different usage checks
         multi_use_tools = ["gravity", "pressure", "atmosphere"]
@@ -1144,7 +1916,6 @@ class Fetcher:
             "difficulty",
             "op",
             "kill",
-            "help",
             "pvp",
             "/sphere",
             "sphere",
@@ -1254,6 +2025,7 @@ class Fetcher:
                             )
 
             # Check for third world visit without tool usage
+            '''
             if len(worlds_visited) >= 3 and data.get("tool_use_count", 0) == 0:
                 trigger_key = f"not_used_tools_since_third_{current_world}"
                 if not data.get(trigger_key, False):
@@ -1271,6 +2043,28 @@ class Fetcher:
 
                     self.triggers_list.append((trigger_message, user, 2))
                     self.tools_usage[user][trigger_key] = True
+            '''
+            # === Trigger: no_tool_use_by_third_world ===
+            trigger_name = "no_tool_use_by_third_world"
+            enabled, priority, category = get_trigger_settings(trigger_name)
+
+            if enabled:
+                if len(worlds_visited) >= 3 and data.get("tool_use_count", 0) == 0:
+                    trigger_key = f"not_used_tools_since_third_{current_world}"
+                    if not data.get(trigger_key, False):
+                        trigger_message = ""
+                        if len(worlds_visited) == 3:
+                            trigger_message = f"{user} has visited 3 worlds without using any tools. Category: {category}"
+                        elif len(worlds_visited) > 3:
+                            trigger_message = f"{user} has visited {len(worlds_visited)} worlds without using any tools. Category: {category}"
+
+                        if trigger_message:
+                            print(trigger_message)
+                            self.triggers_list.append((trigger_message, user, priority))
+                            self.tools_usage[user][trigger_key] = True
+            else:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+
 
             # =============================================================================
             # /Check for no tools used by and since 3rd world
@@ -1279,7 +2073,8 @@ class Fetcher:
             # =============================================================================
             # Check for high tools use (>10 first 3 worlds, >5 succeeding worlds)
             # =============================================================================
-
+            
+            '''
             # Trigger conditions for high tool use
             high_use_trigger_key = f"high_use_{current_world}"
             if (
@@ -1304,11 +2099,50 @@ class Fetcher:
                     (f"{user} has high tool use in {current_world}", user, 7)
                 )
                 data[high_use_trigger_key] = True
+            '''
+            
+            trigger_name = "check_high_tool_use"
+            enabled, priority, category = get_trigger_settings(trigger_name)
+
+            for user, data in self.tools_usage.items():
+                worlds_visited = data.get("worlds_visited", [])
+                current_world = data.get("current_world")
+                world_tool_key = f"tool_count_{current_world}"
+                data.setdefault(world_tool_key, 0)
+                
+                if not enabled:
+                    print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                    continue
+
+                high_use_trigger_key = f"high_use_{current_world}"
+                tool_count = data.get(world_tool_key, 0)
+
+                if (
+                    len(worlds_visited) <= 3
+                    and tool_count > 10
+                    and not data.get(high_use_trigger_key, False)
+                ):
+                    trigger_message = f"{user} has high tool use in the first three worlds: {current_world}. Category: {category}"
+                    print(trigger_message)
+                    self.triggers_list.append((trigger_message, user, priority))
+                    data[high_use_trigger_key] = True
+
+                elif (
+                    len(worlds_visited) > 3
+                    and tool_count > 5
+                    and not data.get(high_use_trigger_key, False)
+                ):
+                    trigger_message = f"{user} has high tool use in subsequent worlds: {current_world}. Category: {category}"
+                    print(trigger_message)
+                    self.triggers_list.append((trigger_message, user, priority))
+                    data[high_use_trigger_key] = True
+
 
             # =============================================================================
             # /Check for high tools use (>10 first 3 worlds, >5 succeeding worlds)
             # =============================================================================
 
+            '''
             if current_world:
                 # this is for the combined use of gravity, pressure, & atmosphere in a single world
                 # neithan set to true then negate if not found to be true during iteration
@@ -1363,7 +2197,63 @@ class Fetcher:
                             (f"{user} has used '/{tool}' in {current_world}", user, 7)
                         )
                         self.tools_usage[user][tool_flag_key] = 1
+            '''
+            
+            # Combined multi-use tool check
+            multi_trigger = "check_combined_multi_use_tools"
+            multi_enabled, multi_priority, category = get_trigger_settings(multi_trigger)
 
+            # Single-use tool check
+            single_trigger = "check_single_use_tools"
+            single_enabled, single_priority, category = get_trigger_settings(single_trigger)
+
+            if current_world:
+                combined_use_flag = True
+                combined_key = f"combined_{current_world}_flag"
+
+                if multi_enabled and data.get(combined_key, 0) == 0:
+                    for tool in multi_use_tools:
+                        tool_key = f"{tool}_{current_world}"
+                        tool_count = data.get(tool_key, 0)
+                        tool_flag_key = f"{tool_key}_flag"
+                        tool_flag = data.get(tool_flag_key, 0)
+
+                        if tool_count < 2:
+                            combined_use_flag = False
+                        if tool_count == 2 and tool_flag == 0:
+                            print(f"{user} has used '/{tool}' more than once in {current_world}.")
+                            self.triggers_list.append(
+                                (f"{user} has used '/{tool}' more than once in {current_world}. Category: {category}", user, multi_priority)
+                            )
+                            self.tools_usage[user][tool_flag_key] = 1
+
+                    if combined_use_flag:
+                        print(f"{user} has combined use of pressure, gravity, & atmosphere in {current_world} more than once")
+                        self.triggers_list.append(
+                            (f"Combined use of pressure, gravity, & atmosphere in {current_world} more than once. Category: {category}", user, multi_priority)
+                        )
+                        self.tools_usage[user][combined_key] = 1
+                elif not multi_enabled:
+                    print(f"\033[90mSkipping {multi_trigger} (priority {multi_priority}) for {user} — disabled in Trigger Manager.\033[0m")
+
+                if single_enabled:
+                    for tool in single_use_tools:
+                        tool_key = f"{tool}_{current_world}"
+                        tool_count = data.get(tool_key, 0)
+                        tool_flag_key = f"{tool_key}_flag"
+                        tool_flag = data.get(tool_flag_key, 0)
+
+                        if tool_count == 1 and tool_flag == 0:
+                            print(f"{user} has used '/{tool}' in {current_world}")
+                            self.triggers_list.append(
+                                (f"{user} has used '/{tool}' in {current_world}", user, single_priority)
+                            )
+                            self.tools_usage[user][tool_flag_key] = 1
+                else:
+                    print(f"\033[90mSkipping {single_trigger} (priority {single_priority}) for {user} — disabled in Trigger Manager.\033[0m")
+
+
+    '''
     def check_3_tools_in_1_minute(self):
         for user, data in self.tools_usage.items():
             tool_usage_timestamps = data.get("tool_usage_timestamps", [])
@@ -1373,7 +2263,25 @@ class Fetcher:
                 print(trigger_message)
                 # Clear the tool usage timestamps to avoid repeated triggers
                 self.tools_usage[user]["tool_usage_timestamps"] = []
-        
+    '''
+    
+    def check_3_tools_in_1_minute(self):
+        trigger_name = "check_3_tools_in_1_minute"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        for user, data in self.tools_usage.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            tool_usage_timestamps = data.get("tool_usage_timestamps", [])
+            if len(tool_usage_timestamps) >= 3:
+                trigger_message = f"{user} has used at least 3 tools in less than a minute. Category: {category}"
+                self.triggers_list.append((trigger_message, user, priority))
+                print(trigger_message)
+                self.tools_usage[user]["tool_usage_timestamps"] = []  # avoid repeated triggers
+
+    '''    
     def check_racing_non_stopping(self):
         # ====================================================
         # //TRIGGER PARAM: check_racing_non_stopping
@@ -1406,6 +2314,40 @@ class Fetcher:
                 self.triggers_list.append((trigger_message, user, 6))
                 print(trigger_message)   
                 self.tools_usage[user]['recent_positions'] = []
+    '''
+    
+    def check_racing_non_stopping(self):
+        trigger_name = "check_racing_non_stopping"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        for user, data in self.tools_usage.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            X = 20  # Number of intervals (each is 3 seconds apart)
+            recent_positions = data.get('recent_positions', [])
+
+            if len(recent_positions) < X:
+                continue  # Not enough data yet
+
+            if len(recent_positions) > X + 1:
+                self.tools_usage[user]['recent_positions'] = []  # Clear if too many
+
+            stops = 0
+            for i in range(1, len(recent_positions)):
+                prev_x, prev_z = recent_positions[i - 1]
+                curr_x, curr_z = recent_positions[i]
+                distance = abs(curr_x - prev_x) + abs(curr_z - prev_z)
+                if distance < 10:
+                    stops += 1
+
+            if stops < 2:
+                trigger_message = f"{user} has less than 2 stops in the last 20 intervals (racing/non-stopping). Category: {category}"
+                self.triggers_list.append((trigger_message, user, priority))
+                print(trigger_message)
+                self.tools_usage[user]['recent_positions'] = []  # Reset after triggering
+
 
     def update_positions_every_3_seconds(self):
         while True:
@@ -1449,6 +2391,7 @@ class Fetcher:
 
             sleep(3)  # Wait for 3 seconds before updating again
 
+    '''
     def check_long_pair_close(self):
         
         # ====================================================
@@ -1499,11 +2442,52 @@ class Fetcher:
                 self.pair_durations[(user_i, user_j)] = 0
             else: 
                 print ()
-                '''
-                print ("pair_durations")
-                print (self.pair_durations)
-                '''
-                
+
+    '''
+    
+    def check_long_pair_close(self):
+        trigger_name = "check_long_pair_close"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        # ====================================================
+        # //TRIGGER PARAMS
+        proximity_threshold = 35      # in blocks
+        duration_increment = 10       # in seconds (on each loop)
+        duration_threshold = 120      # trigger after this many seconds
+        # ====================================================
+
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for i, row_i in self.players.iterrows():
+            user_i = row_i['online_user']
+            world_i = row_i['world']
+            x_i, z_i = row_i['x'], row_i['z']
+
+            for j, row_j in self.players.iterrows():
+                if i >= j:
+                    continue
+                user_j = row_j['online_user']
+                world_j = row_j['world']
+                x_j, z_j = row_j['x'], row_j['z']
+
+                if world_i == world_j:
+                    distance = ((x_i - x_j) ** 2 + (z_i - z_j) ** 2) ** 0.5
+                    if distance <= proximity_threshold:
+                        self.pair_durations[(user_i, user_j)] += duration_increment
+
+        for (user_i, user_j), duration in self.pair_durations.items():
+            if duration >= duration_threshold:
+                trigger_message = f"{user_i} and {user_j} have been close to each other for more than 120 seconds. Category: {category}"
+                self.triggers_list.append((trigger_message, user_i, priority))
+                print(trigger_message)
+                self.pair_durations[(user_i, user_j)] = 0
+
+    '''
     def check_long_far_from_crowd(self):
     
         # ====================================================
@@ -1562,11 +2546,61 @@ class Fetcher:
                 self.tools_usage[user]['far_from_crowd_duration'] = 0
             else:
                 print ()
-                '''
-                print (user)
-                print (self.tools_usage[user]['far_from_crowd_duration'])
-                '''
+                
+                
+    '''
 
+    def check_long_far_from_crowd(self):
+        trigger_name = "check_long_far_from_crowd"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        # ====================================================
+        proximity_threshold = 35
+        duration_increment = 10
+        duration_threshold = 120
+        # ====================================================
+
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for i, row_i in self.players.iterrows():
+            user_i = row_i['online_user']
+            world_i = row_i['world']
+            x_i, z_i = row_i['x'], row_i['z']
+            far_from_crowd = True
+
+            for j, row_j in self.players.iterrows():
+                if i == j:
+                    continue
+                user_j = row_j['online_user']
+                world_j = row_j['world']
+                x_j, z_j = row_j['x'], row_j['z']
+
+                if world_i == world_j:
+                    distance = ((x_i - x_j) ** 2 + (z_i - z_j) ** 2) ** 0.5
+                    if distance <= proximity_threshold:
+                        far_from_crowd = False
+                        break
+
+            if far_from_crowd:
+                self.tools_usage[user_i].setdefault('far_from_crowd_duration', 0)
+                self.tools_usage[user_i]['far_from_crowd_duration'] += duration_increment
+            else:
+                self.tools_usage[user_i]['far_from_crowd_duration'] = 0
+
+        for user, data in self.tools_usage.items():
+            far_from_crowd_duration = data.get('far_from_crowd_duration', 0)
+            if far_from_crowd_duration >= duration_threshold:
+                trigger_message = f"{user} has been far from the crowd for more than 120 seconds. Category: {category}"
+                self.triggers_list.append((trigger_message, user, priority))
+                print(trigger_message)
+                self.tools_usage[user]['far_from_crowd_duration'] = 0
+
+    '''
     def check_prolonged_interaction_npc(self):
     
         # ====================================================
@@ -1623,7 +2657,135 @@ class Fetcher:
                 if "npc_interaction_start" in self.tools_usage[user]:
                     print(f"Removing npc_interaction_start for {user} as they moved away from all NPCs")
                 self.tools_usage[user].pop("npc_interaction_start", None)
+    '''
 
+    def check_multiple_npc_visits(self):
+        trigger_name = "check_multiple_npc_visits"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        # =========================================
+        visit_distance_threshold = 4
+        minutes_window = 5
+        required_unique_npcs = 2
+        disabled_worlds = [
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
+        ]
+        # =========================================
+
+        window_seconds = minutes_window * 60
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for _, row in self.players.iterrows():
+            user = row["online_user"]
+            current_world = row["world"]
+            x, z = row["x"], row["z"]
+
+            if current_world in disabled_worlds:
+                continue
+
+            nearby_npc_name = None
+            for npc_name, details in world_coordinates_dictionary.get(current_world, {}).get("NPCs", {}).items():
+                npc_x, npc_z = details["x"], details["z"]
+                if abs(x - npc_x) + abs(z - npc_z) < visit_distance_threshold:
+                    nearby_npc_name = npc_name
+                    break
+
+            if nearby_npc_name:
+                if "npc_visit_log" not in self.tools_usage[user]:
+                    self.tools_usage[user]["npc_visit_log"] = []
+
+                # Add new visit if not duplicate in last 10s (debounce)
+                visit_log = self.tools_usage[user]["npc_visit_log"]
+                already_logged = any(
+                    visit["npc"] == nearby_npc_name and current_time - visit["time"] < 10
+                    for visit in visit_log
+                )
+                if not already_logged:
+                    visit_log.append({"npc": nearby_npc_name, "time": current_time})
+                    print(f"Logged {user}'s visit to NPC {nearby_npc_name} at {current_time}")
+
+                # Prune visits older than window
+                self.tools_usage[user]["npc_visit_log"] = [
+                    visit for visit in visit_log if current_time - visit["time"] <= window_seconds
+                ]
+
+                # Count unique NPCs
+                unique_npcs = {visit["npc"] for visit in self.tools_usage[user]["npc_visit_log"]}
+                if len(unique_npcs) >= required_unique_npcs:
+                    msg = f"{user} visited {len(unique_npcs)} different NPCs in the last {minutes_window} minutes. Category: {category}"
+                    self.triggers_list.append((msg, user, priority))
+                    print(msg)
+
+                    # Prevent spamming by removing old visits
+                    self.tools_usage[user]["npc_visit_log"] = [
+                        visit for visit in self.tools_usage[user]["npc_visit_log"]
+                        if visit["npc"] not in unique_npcs
+                    ]
+
+
+    def check_prolonged_interaction_npc(self):
+        trigger_name = "check_prolonged_interaction_npc"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        # ====================================================
+        interaction_threshold = 4
+        duration_threshold = 60
+        disabled_worlds = [
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_half", "BrownDwarf"
+        ]
+        # ====================================================
+
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for _, row in self.players.iterrows():
+            user = row["online_user"]
+            current_world = row["world"]
+            x, z = row["x"], row["z"]
+
+            if current_world in disabled_worlds:
+                continue
+
+            interacting_with_npc = False
+
+            for object_name, details in world_coordinates_dictionary.get(current_world, {}).get("NPCs", {}).items():
+                npc_x, npc_z = details["x"], details["z"]
+                distance = abs(x - npc_x) + abs(z - npc_z)
+
+                if distance < interaction_threshold:
+                    interacting_with_npc = True
+                    if "npc_interaction_start" not in self.tools_usage[user]:
+                        self.tools_usage[user]["npc_interaction_start"] = current_time
+                        print(f"Setting npc_interaction_start for {user} at {current_time}")
+                    interaction_start_time = self.tools_usage[user]["npc_interaction_start"]
+                    if current_time - interaction_start_time >= duration_threshold:
+                        trigger_message = f"{user} has been interacting with NPC {object_name} for more than 60 seconds. Category: {category}"
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(trigger_message)
+                        self.tools_usage[user]["npc_interaction_start"] = current_time - 50  # breathing room
+                    else:
+                        # print(current_time, interaction_start_time, current_time - interaction_start_time)
+                        print (f"{user} has possible npc interaction. Waiting to reach threshold.")
+                        
+                    break
+
+            if not interacting_with_npc:
+                if "npc_interaction_start" in self.tools_usage[user]:
+                    print(f"Removing npc_interaction_start for {user} as they moved away from all NPCs")
+                self.tools_usage[user].pop("npc_interaction_start", None)
+    
+    '''
     def check_prolonged_stay_poi(self):
         
         # ====================================================
@@ -1678,7 +2840,350 @@ class Fetcher:
                 if "poi_stay_start" in self.tools_usage[user]:
                     print(f"Removing poi_stay_start for {user} as they moved away from all POIs")
                 self.tools_usage[user].pop("poi_stay_start", None)
+    '''
 
+    def check_world_exploration(self):
+        trigger_name = "check_world_exploration"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        eligible_worlds = ["Mynoa", "ColderSun", "TiltedEarth", "TwoMoons"]
+        threshold = 0.1  # Minimum absolute x-value to count as "side visit"
+
+        # self.tools_usage will now store:
+        # tools_usage[username]["visited_sides"][world] = {"positive": True/False, "negative": True/False}
+        # self.tools_usage[username]["explored_worlds"] = set()
+
+        for _, row in self.players.iterrows():
+            username = row["online_user"]
+            world = row["world"]
+            x = row["x"]
+
+            if world not in eligible_worlds:
+                continue
+
+            # Init structures if not present
+            if "visited_sides" not in self.tools_usage[username]:
+                self.tools_usage[username]["visited_sides"] = {}
+            if "explored_worlds" not in self.tools_usage[username]:
+                self.tools_usage[username]["explored_worlds"] = set()
+
+            if world not in self.tools_usage[username]["visited_sides"]:
+                self.tools_usage[username]["visited_sides"][world] = {"positive": False, "negative": False}
+
+            side_data = self.tools_usage[username]["visited_sides"][world]
+
+            # Mark side visit
+            if x >= threshold:
+                side_data["positive"] = True
+            elif x <= -threshold:
+                side_data["negative"] = True
+
+            # If both sides visited, and not yet credited
+            if side_data["positive"] and side_data["negative"] and world not in self.tools_usage[username]["explored_worlds"]:
+                # Init if first time
+                if not hasattr(self, "world_explorers"):
+                    self.world_explorers = defaultdict(list)
+
+                if username not in self.world_explorers[world]:
+                    if len(self.world_explorers[world]) < 3:
+                        self.world_explorers[world].append(username)
+                        self.tools_usage[username]["explored_worlds"].add(world)
+
+                        msg = f"{username} is among the first explorers to visit both sides of {world}. Category: {category}"
+                        self.triggers_list.append((msg, username, priority))
+                        print(msg)
+
+
+    def check_tool_inspiration_specific(self):
+        trigger_name = "check_tool_inspiration_specific"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        df = self.science_tools
+        if df.empty or len(df) < 2:
+            print(f"\033[90m{trigger_name}: Not enough science tool data.\033[0m")
+            return
+
+        df = df.sort_values(by="time").reset_index(drop=True)
+
+        for i in range(1, len(df)):
+            current = df.iloc[i]
+            for j in range(i):
+                previous = df.iloc[j]
+                if (
+                    current["username"] != previous["username"]
+                    and current["world"] == previous["world"]
+                    and current["tool"] == previous["tool"]
+                ):
+                    msg = (
+                        f"{current['username']} used {current['tool']} after {previous['username']} used the same tool. "
+                        f"Category: {category}"
+                    )
+                    self.triggers_list.append((msg, current["username"], priority))
+                    print(msg)
+                    break  # only need the first match
+
+
+    def check_tool_inspiration_generic(self):
+        trigger_name = "check_tool_inspiration_generic"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        df = self.science_tools
+        if df.empty or len(df) < 2:
+            print(f"\033[90m{trigger_name}: Not enough science tool data.\033[0m")
+            return
+
+        df = df.sort_values(by="time").reset_index(drop=True)
+
+        for i in range(1, len(df)):
+            current = df.iloc[i]
+            for j in range(i):
+                previous = df.iloc[j]
+                if (
+                    current["username"] != previous["username"]
+                    and current["world"] == previous["world"]
+                    and current["tool"] != previous["tool"]  # <— prevent duplicates handled by specific version
+                ):
+                    msg = (
+                        f"{current['username']} used {current['tool']} after {previous['username']} used {previous['tool']} in {current['world']}. "
+                        f"Category: {category}"
+                    )
+                    self.triggers_list.append((msg, current["username"], priority))
+                    print(msg)
+                    break  # only trigger once per player
+
+
+    def check_advanced_tool_use(self):
+        trigger_name = "check_advanced_tool_use"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        advanced_tools = {
+            "COSMIC RAYS",
+            "ROTATIONAL_PERIOD",
+            "ALTITUDE",
+            "SCALE",
+            "YEAR",
+            "RADIUS",
+        }
+
+        df = self.science_tools
+        if df.empty:
+            print(f"\033[90m{trigger_name}: No science tool data available.\033[0m")
+            return
+
+        for _, row in df.iterrows():
+            tool = str(row["tool"]).upper()
+            user = row["username"]
+            world = row["world"]
+
+            if tool in advanced_tools:
+                msg = f"{user} used advanced tool {tool} in {world}. Category: {category}"
+                self.triggers_list.append((msg, user, priority))
+                print(msg)
+
+
+
+    '''
+    def check_visit_unmarked_pois(self):
+        trigger_name = "check_visit_unmarked_pois"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        # ====================================================
+        duration_threshold = 90  # seconds
+        disabled_worlds = [
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
+        ]
+        # ====================================================
+
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for _, row in self.players.iterrows():
+            user = row["online_user"]
+            current_world = row["world"]
+            x, z = row["x"], row["z"]
+
+            if current_world in disabled_worlds:
+                continue
+
+            inside_any_poi = False
+
+            for object_type, objects in world_coordinates_dictionary.get(current_world, {}).items():
+                if object_type == "Global":
+                    continue
+
+                for object_name, details in objects.items():
+                    if "range" in details:
+                        if self.is_point_inside_space(x, z, details["range"]):
+                            inside_any_poi = True
+                            break
+                if inside_any_poi:
+                    break
+
+            if not inside_any_poi:
+                if "outside_poi_start" not in self.tools_usage[user]:
+                    self.tools_usage[user]["outside_poi_start"] = current_time
+
+                stay_duration = current_time - self.tools_usage[user]["outside_poi_start"]
+
+                if stay_duration >= duration_threshold:
+                    trigger_message = f"{user} appears to be exploring an unmarked science-relevant area. Category: {category}"
+                    self.triggers_list.append((trigger_message, user, priority))
+                    print(trigger_message)
+
+                    self.tools_usage[user]["outside_poi_start"] = current_time - 80
+                else:
+                    print(f"{user} is outside any POI. Waiting to reach exploration threshold...")
+            else:
+                if "outside_poi_start" in self.tools_usage[user]:
+                    print(f"{user} entered a POI. Clearing outside_poi_start timer.")
+                self.tools_usage[user].pop("outside_poi_start", None)
+    '''
+
+    def check_visit_unmarked_pois(self):
+        trigger_name = "check_visit_unmarked_pois"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        duration_threshold = 90  # seconds
+        cooldown_period = 600  # 10 minutes in seconds
+
+        disabled_worlds = [
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
+        ]
+
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for _, row in self.players.iterrows():
+            user = row["online_user"]
+            current_world = row["world"]
+            x, z = row["x"], row["z"]
+
+            if current_world in disabled_worlds:
+                continue
+
+            inside_any_poi = False
+
+            for object_type, objects in world_coordinates_dictionary.get(current_world, {}).items():
+                if object_type == "Global":
+                    continue
+
+                for object_name, details in objects.items():
+                    if "range" in details and self.is_point_inside_space(x, z, details["range"]):
+                        inside_any_poi = True
+                        break
+                if inside_any_poi:
+                    break
+
+            if not inside_any_poi:
+                self.tools_usage.setdefault(user, {})
+
+                if "outside_poi_start" not in self.tools_usage[user]:
+                    self.tools_usage[user]["outside_poi_start"] = current_time
+
+                stay_duration = current_time - self.tools_usage[user]["outside_poi_start"]
+
+                last_trigger_time = self.tools_usage[user].get("last_unmarked_poi_trigger", 0)
+                cooldown_passed = current_time - last_trigger_time >= cooldown_period
+
+                if stay_duration >= duration_threshold and cooldown_passed:
+                    trigger_message = f"{user} appears to be exploring an unmarked science-relevant area. Category: {category}"
+                    self.triggers_list.append((trigger_message, user, priority))
+                    print(trigger_message)
+
+                    # Reset timer and update last trigger
+                    self.tools_usage[user]["outside_poi_start"] = current_time - 80
+                    self.tools_usage[user]["last_unmarked_poi_trigger"] = current_time
+                else:
+                    print(f"{user} is outside any POI. Waiting to reach exploration threshold or cooldown.")
+            else:
+                if "outside_poi_start" in self.tools_usage[user]:
+                    print(f"{user} entered a POI. Clearing outside_poi_start timer.")
+                self.tools_usage[user].pop("outside_poi_start", None)
+
+    
+    def check_prolonged_stay_poi(self):
+        trigger_name = "check_prolonged_stay_poi"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        # ====================================================
+        duration_threshold = 90
+        disabled_worlds = [
+            "LunarCrater", "TiltedEarth_JungleIsland", "TiltedEarth_Frozen",
+            "TiltedEarth_Melting", "Mynoa_close", "Mynoa_half", "Cancri", "BrownDwarf"
+        ]
+        # ====================================================
+
+        central_tz = pytz.timezone("America/Chicago")
+        current_time = datetime.now(central_tz).timestamp()
+
+        for _, row in self.players.iterrows():
+            user = row["online_user"]
+            current_world = row["world"]
+            x, z = row["x"], row["z"]
+
+            if current_world in disabled_worlds:
+                continue
+
+            staying_in_poi = False
+
+            for object_type, objects in world_coordinates_dictionary.get(current_world, {}).items():
+                if object_type == "Global":
+                    continue
+
+                for object_name, details in objects.items():
+                    if "range" in details:
+                        if self.is_point_inside_space(x, z, details["range"]):
+                            staying_in_poi = True
+                            if "poi_stay_start" not in self.tools_usage[user]:
+                                self.tools_usage[user]["poi_stay_start"] = current_time
+                            poi_stay_start_time = self.tools_usage[user]["poi_stay_start"]
+
+                            if current_time - poi_stay_start_time >= duration_threshold:
+                                trigger_message = f"{user} has been within POI {object_name} for more than 90 seconds. Category: {category}"
+                                self.triggers_list.append((trigger_message, user, priority))
+                                print(trigger_message)
+                                self.tools_usage[user]["poi_stay_start"] = current_time - 80
+                            else:
+                                # print(current_time, poi_stay_start_time, current_time - poi_stay_start_time)
+                                print(f"{user} is possibly staying in POI. Waiting to reach threshold.")
+                            break
+
+            if not staying_in_poi:
+                if "poi_stay_start" in self.tools_usage[user]:
+                    print(f"Removing poi_stay_start for {user} as they moved away from all POIs")
+                self.tools_usage[user].pop("poi_stay_start", None)
+
+    '''
     def check_teleporting_to_multiple_players(self):
         # Fetch the current command data
         command_data = self.co_command
@@ -1712,7 +3217,43 @@ class Fetcher:
                 trigger_message = f"{username} tried teleporting to multiple players ({target_users}) in a single command."
                 self.triggers_list.append((trigger_message, username, 4))
                 print(trigger_message)
+    '''
 
+    def check_teleporting_to_multiple_players(self):
+        trigger_name = "check_teleporting_to_multiple_players"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        command_data = self.co_command
+        if command_data.empty:
+            return
+
+        co_user_df = self.co_user
+        merged_df = pd.merge(command_data, co_user_df, left_on="user", right_on="rowid", suffixes=('', '_user'))
+
+        # Optional debug output
+        # print("merged DF")
+        # print(merged_df)
+        # print("Columns in merged DF:", merged_df.columns)
+
+        tp_commands = merged_df[merged_df['message'].str.startswith(('/tp ', '/tpa '))].copy()
+
+        tp_commands.loc[:, 'target_user'] = tp_commands['message'].str.split().str[1]
+        tp_commands['target_users'] = tp_commands['message'].str.split().apply(lambda x: x[1:])
+        tp_commands['num_target_users'] = tp_commands['target_users'].apply(len)
+
+        for _, row in tp_commands.iterrows():
+            if row['num_target_users'] >= 2:
+                username = row['user_user']  # Correctly resolved column from co_user
+                target_users = ", ".join(row['target_users'])
+                trigger_message = f"{username} tried teleporting to multiple players ({target_users}) in a single command. Category: {category}"
+                self.triggers_list.append((trigger_message, username, priority))
+                print(trigger_message)
+    
+    '''
     def check_specific_commands(self):
         # Fetch the current command data
         command_data = self.co_command_with_worlds
@@ -1746,7 +3287,47 @@ class Fetcher:
             trigger_message = f"{username} used the command '{command}' in world '{world}'."
             self.triggers_list.append((trigger_message, username, 3))
             print(trigger_message)
+    '''
 
+    def check_specific_commands(self):
+        trigger_name = "check_specific_commands"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        if not enabled:
+            print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+            return
+
+        command_data = self.co_command_with_worlds
+        if command_data.empty:
+            return
+
+        trigger_commands = [
+            "/kill",
+            "/enable pvp",
+            "/god",
+            "/gamemode",
+            "/difficulty",
+            "/op",
+            "/help",
+            "/agent chat"
+        ]
+
+        excluded_worlds = ["hub", "earthcontrol", "etlife", "rocketlaunch", "play", "mars"]
+
+        specific_commands = command_data[
+            command_data['message'].str.startswith(tuple(trigger_commands)) &
+            ~command_data['world'].isin(excluded_worlds)
+        ]
+
+        for _, row in specific_commands.iterrows():
+            username = row['username']
+            command = row['message']
+            world = row['world']
+            trigger_message = f"{username} used the command '{command}' in world '{world}'. Category: {category}"
+            self.triggers_list.append((trigger_message, username, priority))
+            print(trigger_message)
+    
+    '''
     def check_five_or_more_observations_in_world(self):
         for user, data in self.tools_usage.items():
             for world, count in data.get("world_observation_counts", {}).items():
@@ -1768,19 +3349,50 @@ class Fetcher:
                         self.triggers_list.append((trigger_message, user, 8))
                         print(trigger_message)
                         data[trigger_key] = True
+    '''
+    
+    def check_five_or_more_observations_in_world(self):
+        trigger_name = "check_five_or_more_observations_in_world"
+        enabled, priority, category = get_trigger_settings(trigger_name)
 
+        for user, data in self.tools_usage.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            for world, count in data.get("world_observation_counts", {}).items():
+                if count >= 5:
+                    trigger_key = f"five_observations_{world}"
+                    if not data.get(trigger_key, False):
+                        trigger_message = f"{user} has made 5 or more observations in {world}. Category: {category}"
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(trigger_message)
+                        data[trigger_key] = True
+
+    def check_five_or_more_tools_in_world(self):
+        trigger_name = "check_five_or_more_tools_in_world"
+        enabled, priority, category = get_trigger_settings(trigger_name)
+
+        for user, data in self.tools_usage.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            for world, count in data.get("world_tool_counts", {}).items():
+                if count >= 5:
+                    trigger_key = f"five_tools_{world}"
+                    if not data.get(trigger_key, False):
+                        trigger_message = f"{user} has used 5 or more tools in {world}. Category: {category}"
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(trigger_message)
+                        data[trigger_key] = True
+    
+    '''
     def check_five_chat_messages_in_world(self):
         # Merge co_chat and co_user to get usernames
         merged_df = pd.merge(self.co_chat_with_worlds, self.co_user, left_on='user_id', right_on='rowid')
 
-        '''
-        # Print columns to check the correct column names
-        print("Chat DataFrame columns:", merged_df.columns)
 
-        # Print the raw chat data for debugging
-        print("Raw Chat Data:")
-        print(merged_df)
-        '''
 
         # Track chat entries for each user in each world
         for _, row in merged_df.iterrows():
@@ -1835,7 +3447,67 @@ class Fetcher:
                         self.triggers_list.append((trigger_message, user, 8))
                         print(trigger_message)
                         data[trigger_key] = True
+    '''
+    
+    def check_five_chat_messages_in_world(self):
+        trigger_name = "check_five_chat_messages_in_world"
+        enabled, priority, category = get_trigger_settings(trigger_name)
 
+        # Merge co_chat and co_user to get usernames
+        merged_df = pd.merge(self.co_chat_with_worlds, self.co_user, left_on='user_id', right_on='rowid')
+
+        # Track chat entries for each user in each world
+        for _, row in merged_df.iterrows():
+            username = row['user']
+            world = row['world']
+            message = row['message'].strip()
+
+            if username not in self.tools_usage:
+                self.tools_usage[username] = {
+                    "worlds_visited": [],
+                    "current_world": world,
+                    "tool_use_count": 0,
+                    "total_observation_count": 0,
+                    "world_observation_counts": {},
+                    "last_observation_time": 0,
+                    "mynoa_start_time": None,
+                    "mynoa_trigger_fired": False,
+                    "recent_positions": [],
+                    "recent_observations": [],
+                    "tool_usage_timestamps": [],
+                    "last_tool_use_time": 0,
+                    "world_tool_counts": {},
+                    "far_from_crowd_duration": 0,
+                    "npc_interaction_start": None,
+                    "poi_stay_start": None,
+                    "chat_counts": {}  # Initialize chat counts
+                }
+
+            if 'chat_counts' not in self.tools_usage[username]:
+                self.tools_usage[username]['chat_counts'] = {}
+
+            if world not in self.tools_usage[username]['chat_counts']:
+                self.tools_usage[username]['chat_counts'][world] = 0
+
+            # Increment the chat count for the user in the current world
+            self.tools_usage[username]['chat_counts'][world] += 1
+
+        # Evaluate triggers
+        for user, data in self.tools_usage.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            for world, chat_count in data.get('chat_counts', {}).items():
+                if chat_count >= 5:
+                    trigger_key = f"five_chats_{world}"
+                    if not data.get(trigger_key, False):
+                        trigger_message = f"{user} has sent 5 or more chat messages in {world}. Category: {category}"
+                        self.triggers_list.append((trigger_message, user, priority))
+                        print(trigger_message)
+                        data[trigger_key] = True
+
+    '''
     def check_tool_use_counts(self):
         for user, data in self.tools_usage.items():
             for tool, worlds in data.get("tool_counts", {}).items():
@@ -1854,7 +3526,36 @@ class Fetcher:
                             self.triggers_list.append((trigger_message, user, 4))
                             print(trigger_message)
                             data[trigger_key] = True
+    '''
+    
+    def check_tool_use_counts(self):
+        trigger_name = "check_tool_use_counts"
+        enabled, priority, category = get_trigger_settings(trigger_name)
 
+        for user, data in self.tools_usage.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            for tool, worlds in data.get("tool_counts", {}).items():
+                for world, count in worlds.items():
+                    if tool == "gravity" and count > 2:
+                        trigger_key = f"gravity_tool_{world}"
+                        if not data.get(trigger_key, False):
+                            trigger_message = f"{user} has used gravity more than twice in {world}. Category: {category}"
+                            self.triggers_list.append((trigger_message, user, priority))
+                            print(trigger_message)
+                            data[trigger_key] = True
+                    elif tool != "gravity" and count > 3:
+                        trigger_key = f"{tool}_tool_{world}"
+                        if not data.get(trigger_key, False):
+                            trigger_message = f"{user} has used {tool} more than three times in {world}. Category: {category}"
+                            self.triggers_list.append((trigger_message, user, priority))
+                            print(trigger_message)
+                            data[trigger_key] = True
+
+
+    '''
     def check_over_200_actions_in_2_minutes(self):
         # Filter to include only destroy (0) and place (1) actions
         filtered_df = self.co_block_with_users[self.co_block_with_users['action'].isin([0, 1])]
@@ -1878,7 +3579,33 @@ class Fetcher:
                 trigger_message = f"{user} has performed over 200 actions (place/destroy) in the last 2 minutes."
                 self.triggers_list.append((trigger_message, user, 1))
                 print(trigger_message)
+    '''
+    
+    def check_over_200_actions_in_2_minutes(self):
+        trigger_name = "check_over_200_actions_in_2_minutes"
+        enabled, priority, category = get_trigger_settings(trigger_name)
 
+        # Filter to include only destroy (0) and place (1) actions
+        filtered_df = self.co_block_with_users[self.co_block_with_users['action'].isin([0, 1])]
+
+        # Count the actions per user
+        action_counts = filtered_df['username'].value_counts()
+
+        if not action_counts.empty:
+            print(f"\033[95m\nBUILD/DESTROY ACTION COUNTS:\033[0m\n{action_counts}\n")
+
+        # Trigger if actions exceed 200 within 2 minutes
+        for user, count in action_counts.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            if count > 200:
+                trigger_message = f"{user} has performed over 200 actions (place/destroy) in the last 2 minutes. Category: {category}"
+                self.triggers_list.append((trigger_message, user, priority))
+                print(trigger_message)
+
+    '''
     def check_over_200_placed_actions_in_2_minutes(self):
         # Filter to include only place (1) actions and valid usernames
         filtered_df = self.co_block_with_users[(self.co_block_with_users['action'] == 1) &
@@ -1896,7 +3623,36 @@ class Fetcher:
                 trigger_message = f"{user} has placed over 200 blocks in the last 2 minutes."
                 self.triggers_list.append((trigger_message, user, 1))
                 print(trigger_message)
+    '''
+    
+    def check_over_200_placed_actions_in_2_minutes(self):
+        trigger_name = "check_over_200_placed_actions_in_2_minutes"
+        enabled, priority, category = get_trigger_settings(trigger_name)
 
+        # Filter to include only place (1) actions and valid usernames
+        filtered_df = self.co_block_with_users[
+            (self.co_block_with_users['action'] == 1) &
+            (~self.co_block_with_users['username'].str.startswith('#'))
+        ]
+
+        # Count the place actions per user
+        action_counts = filtered_df['username'].value_counts()
+
+        if not action_counts.empty:
+            print(f"\033[95m\nPLACE ACTION COUNTS:\033[0m\n{action_counts}\n")
+
+        # Trigger if place actions exceed 200 within 2 minutes
+        for user, count in action_counts.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            if count > 200:
+                trigger_message = f"{user} has placed over 200 blocks in the last 2 minutes. Category: {category}"
+                self.triggers_list.append((trigger_message, user, priority))
+                print(trigger_message)
+    
+    '''
     def check_over_200_destroyed_actions_in_2_minutes(self):
         # Filter to include only destroy (0) actions and valid usernames
         filtered_df = self.co_block_with_users[(self.co_block_with_users['action'] == 0) &
@@ -1914,7 +3670,36 @@ class Fetcher:
                 trigger_message = f"{user} has destroyed over 200 blocks in the last 2 minutes."
                 self.triggers_list.append((trigger_message, user, 1))
                 print(trigger_message)
+    '''
+    
+    def check_over_200_destroyed_actions_in_2_minutes(self):
+        trigger_name = "check_over_200_destroyed_actions_in_2_minutes"
+        enabled, priority, category = get_trigger_settings(trigger_name)
 
+        # Filter to include only destroy (0) actions and valid usernames
+        filtered_df = self.co_block_with_users[
+            (self.co_block_with_users['action'] == 0) &
+            (~self.co_block_with_users['username'].str.startswith('#'))
+        ]
+
+        # Count the destroy actions per user
+        action_counts = filtered_df['username'].value_counts()
+
+        if not action_counts.empty:
+            print(f"\033[95m\nDESTROY ACTION COUNTS:\033[0m\n{action_counts}\n")
+
+        # Trigger if destroy actions exceed 200 within 2 minutes
+        for user, count in action_counts.items():
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+                continue
+
+            if count > 200:
+                trigger_message = f"{user} has destroyed over 200 blocks in the last 2 minutes. Category: {category}"
+                self.triggers_list.append((trigger_message, user, priority))
+                print(trigger_message)
+
+    
     def check_block_triggers(self):
         current_time = datetime.now(pytz.timezone("America/Chicago")).timestamp()
 
@@ -1933,57 +3718,322 @@ class Fetcher:
                                                    (self.co_block_with_users['action'] == action) &
                                                    (~self.co_block_with_users['username'].str.startswith('#'))]
 
-            '''
-            # FOR CHECKING ignoring time window first
-            # Check for high threshold (ignoring time window)
-            if high_threshold != -1:
-                high_action_counts = filtered_df['username'].value_counts()
-
-                for user, count in high_action_counts.items():
-                    if count >= high_threshold:
-                        action_type = 'placed' if action == 1 else 'destroyed'
-                        trigger_message = f"{user} has {action_type} {count} {material} blocks (ignoring time window for testing)."
-                        self.triggers_list.append((trigger_message, user, priority))
-                        print(f"High trigger: {trigger_message}")
-
-            # Check for low threshold (ignoring time window)
-            if low_threshold != -1:
-                low_action_counts = filtered_df['username'].value_counts()
-
-                for user, count in low_action_counts.items():
-                    if count >= low_threshold:
-                        action_type = 'placed' if action == 1 else 'destroyed'
-                        trigger_message = f"{user} has {action_type} {count} {material} blocks (ignoring time window for testing)."
-                        self.triggers_list.append((trigger_message, user, priority))
-                        print(f"Low trigger: {trigger_message}")
-            '''
             
             # Check for high threshold within the high time window
             if high_threshold != -1:
                 high_window_start = current_time - time_window_high
-                high_window_df = filtered_df[filtered_df['time'] >= high_window_start]
+
+                # Luc added                
+                trigger_times = self.prev_trig_time.loc[self.prev_trig_time['Material'] == material]
+                trigger_times = trigger_times.loc[trigger_times['Action'] == action]
+                trigger_times = trigger_times.loc[trigger_times['H_or_l'] == "high"]
+                
+                # Luc modified
+                
+                #high_window_df = filtered_df[filtered_df['time'] >= high_window_start]
+                
+                # Luc - I tried to make this work without a loop, but couldn't make it work. Could probably be made more efficient
+                rows_to_drop = []
+                for _, row in filtered_df.iterrows():
+                    # (trigger_times.empty) or not (trigger_times.loc[trigger_times['User'] == filtered_df['username']].empty) else trigger_times.loc[trigger_times['User'] == filtered_df['username']]["Time"]
+                    window_start_time = high_window_start
+                    if (not trigger_times.empty and (not trigger_times.loc[trigger_times['User'] == row['username']].empty)):
+                        selected_row = trigger_times.loc[trigger_times['User'] == row['username']]
+                        print (selected_row)
+                        selected_row_index = selected_row.index.values.astype(int)[0]
+                        window_start_time = max(window_start_time, selected_row.loc[selected_row_index]['Time'])
+                    
+                    # print(f"Original threshold: {high_window_start},    New threshold: {window_start_time}")
+                    
+                    if row['time'] < window_start_time:
+                        rows_to_drop.append(row['rowid'])
+                    
+                #high_window_df = filtered_df[filtered_df['rowid'] > 0]
+                
+                #print(f"Rows to drop: {rows_to_drop}")
+                #print(f"Before filtering:\n{filtered_df}")
+                
+                high_window_df = filtered_df[~filtered_df['rowid'].isin(rows_to_drop)]
+                
+                #print (f"After filtering:\n{high_window_df}")
+                
                 high_action_counts = high_window_df['username'].value_counts()
 
                 for user, count in high_action_counts.items():
                     if count >= high_threshold:
                         action_type = 'placed' if action == 1 else 'destroyed'
-                        trigger_message = f"High Block Usage: {user} has {action_type} {count} {material} blocks in the last {time_window_low} seconds."
+                        trigger_message = f"High Block Usage: {user} has {action_type} {count} {material} blocks in the last {time_window_high} seconds."
                         self.triggers_list.append((trigger_message, user, priority))
+                        
+                        # Luc need to fix this
+                        # if the row exists drop it (or replace one value in it)
+                        # othersiwe concat (if modified)
+                        # If dropped, always do the concat
+                        
+                        # Luc - not sure why but I wasn't able to select on multiple columns at the same time. Could probably be made more efficient
+                        previous_row = self.prev_trig_time.loc[self.prev_trig_time['Material'] == material]
+                        previous_row = previous_row.loc[previous_row['Action'] == action]
+                        previous_row = previous_row.loc[previous_row['H_or_l'] == "high"]
+                        previous_row = previous_row.loc[previous_row['User'] == user]
+                        
+                        print (f"Before: {self.prev_trig_time}")
+                        
+                        if not previous_row.empty:
+                            print ("***************** row exists ************")
+                            index = self.prev_trig_time[(self.prev_trig_time['Material'] == material) & (self.prev_trig_time['Action'] == action) & (self.prev_trig_time['H_or_l'] == "high") & (self.prev_trig_time['User'] == user)].index.values.astype(int)[0]
+                            print (f"Index: {index}")
+                            self.prev_trig_time = self.prev_trig_time.drop(index)
+                            #previous_row['Time'] = current_time
+                            #self.prev_trig_time = self.prev_trig_time[self.prev_trig_time['Material'] != material, self.prev_trig_time['Action'] != action, self.prev_trig_time['H_or_l'] != "high", self.prev_trig_time['User'] == user]
+                        
+                        print ("**************** concat ****************")
+                        self.prev_trig_time = pd.concat([self.prev_trig_time, pd.DataFrame.from_records([{'User': user, 'Material': material, "Action": action, "H_or_l": "high", "Time": current_time}])], ignore_index = True)
+                        
+                        print (f"After: {self.prev_trig_time}")
+                        
                         print(trigger_message)
 
             # Check for low threshold within the low time window
-            if low_threshold != -1:
-                low_window_start = current_time - time_window_low
-                low_window_df = filtered_df[filtered_df['time'] >= low_window_start]
-                low_action_counts = low_window_df['username'].value_counts()
+            #if low_threshold != -1:
+            #    low_window_start = current_time - time_window_low
+                
+            #    low_window_df = filtered_df[filtered_df['time'] >= low_window_start]
+            #    low_action_counts = low_window_df['username'].value_counts()
 
-                for user, count in low_action_counts.items():
-                    if count <= low_threshold:
+            #    for user, count in low_action_counts.items():
+            #        if count <= low_threshold:
+            #            action_type = 'placed' if action == 1 else 'destroyed'
+            #            trigger_message = f"Low Block Usage: {user} has {action_type} only {count} {material} blocks in the last {time_window_low} seconds."
+            #            self.triggers_list.append((trigger_message, user, priority))
+            #            
+            #            print(trigger_message)
+    
+    '''
+    def check_block_triggers(self):
+        current_time = datetime.now(pytz.timezone("America/Chicago")).timestamp()
+
+        for _, trigger_row in self.block_triggers_df.iterrows():
+            block_type = trigger_row['type']
+            material = trigger_row['material']
+            action = trigger_row['action']
+            time_window_high = trigger_row['Time_Window_High']
+            high_threshold = trigger_row['High_Threshold']
+            time_window_low = trigger_row['Time_Window_Low']
+            low_threshold = trigger_row['Low_Threshold']
+            priority = trigger_row['Priority']
+
+            trigger_name = f"block_{material}_{'placed' if action == 1 else 'destroyed'}"
+            enabled, _ = get_trigger_settings(trigger_name)
+            if not enabled:
+                print(f"\033[90mSkipping {trigger_name} (priority {priority}) — disabled in Trigger Manager.\033[0m")
+                continue
+
+            filtered_df = self.co_block_with_users[
+                (self.co_block_with_users['type'] == block_type) &
+                (self.co_block_with_users['action'] == action) &
+                (~self.co_block_with_users['username'].str.startswith('#'))
+            ]
+
+            if high_threshold != -1:
+                high_window_start = current_time - time_window_high
+                trigger_times = self.prev_trig_time[
+                    (self.prev_trig_time['Material'] == material) &
+                    (self.prev_trig_time['Action'] == action) &
+                    (self.prev_trig_time['H_or_l'] == "high")
+                ]
+
+                rows_to_drop = []
+                for _, row in filtered_df.iterrows():
+                    window_start_time = high_window_start
+                    user_trigger_times = trigger_times[trigger_times['User'] == row['username']]
+                    if not user_trigger_times.empty:
+                        idx = user_trigger_times.index[0]
+                        window_start_time = max(window_start_time, user_trigger_times.loc[idx]['Time'])
+                    if row['time'] < window_start_time:
+                        rows_to_drop.append(row['rowid'])
+
+                high_window_df = filtered_df[~filtered_df['rowid'].isin(rows_to_drop)]
+                high_action_counts = high_window_df['username'].value_counts()
+
+                for user, count in high_action_counts.items():
+                    if count >= high_threshold:
                         action_type = 'placed' if action == 1 else 'destroyed'
-                        trigger_message = f"Low Block Usage: {user} has {action_type} only {count} {material} blocks in the last {time_window_low} seconds."
+                        trigger_message = f"High Block Usage: {user} has {action_type} {count} {material} blocks in the last {time_window_high} seconds."
                         self.triggers_list.append((trigger_message, user, priority))
                         print(trigger_message)
-            
+
+                        # Update prev_trig_time
+                        self.prev_trig_time = self.prev_trig_time[
+                            ~((self.prev_trig_time['User'] == user) &
+                              (self.prev_trig_time['Material'] == material) &
+                              (self.prev_trig_time['Action'] == action) &
+                              (self.prev_trig_time['H_or_l'] == "high"))
+                        ]
+                        self.prev_trig_time = pd.concat([
+                            self.prev_trig_time,
+                            pd.DataFrame.from_records([{
+                                'User': user,
+                                'Material': material,
+                                'Action': action,
+                                'H_or_l': "high",
+                                'Time': current_time
+                            }])
+                        ], ignore_index=True)
+    '''
+
+# =============================================================================
+# Trigger Manager
+# =============================================================================
+
+'''
+def launch_trigger_manager():
+    import tkinter as tk
+    from tkinter import ttk
+
+    try:
+        with open("trigger_config.json", "r") as f:
+            trigger_config = json.load(f)
+    except FileNotFoundError:
+        trigger_config = {}
+
+    root = tk.Tk()
+    root.title("Trigger Manager")
+
+    checkbox_vars = {}
+    priority_entries = {}
+
+
+    
+    def save_settings():
+        updated_config = {}
+        for trigger, var in checkbox_vars.items():
+            priority_val = priority_entries[trigger].get()
+            try:
+                priority = int(priority_val)
+            except ValueError:
+                priority = 1
+
+            # Preserve existing category if present
+            existing = trigger_config.get(trigger, {})
+            category = existing.get("category", "Uncategorized")
+
+            updated_config[trigger] = {
+                "enabled": var.get(),
+                "priority": priority,
+                "category": category
+            }
+
+        with open("trigger_config.json", "w") as f:
+            json.dump(updated_config, f, indent=4)
+
+        status_label.config(text="Settings saved!", foreground="green")
+        root.after(3000, lambda: status_label.config(text=""))
+
+
+    for trigger, settings in trigger_config.items():
+        frame = ttk.Frame(root)
+        frame.pack(fill='x', padx=10, pady=3)
+
+        var = tk.BooleanVar(value=settings.get("enabled", False))
+        checkbox = ttk.Checkbutton(frame, text=trigger, variable=var)
+        checkbox.pack(side='left')
+        checkbox_vars[trigger] = var
+
+        ttk.Label(frame, text="Priority:").pack(side='left', padx=(10, 0))
+        entry = ttk.Entry(frame, width=5)
+        entry.insert(0, str(settings.get("priority", 1)))
+        entry.pack(side='left')
+        priority_entries[trigger] = entry
+
+    ttk.Button(root, text="Save", command=save_settings).pack(pady=10)
+    status_label = ttk.Label(root, text="")
+    status_label.pack()
+
+    root.mainloop()
+'''
+
+def launch_trigger_manager():
+    import tkinter as tk
+    from tkinter import ttk
+    import json
+
+    try:
+        with open("trigger_config.json", "r") as f:
+            trigger_config = json.load(f)
+    except FileNotFoundError:
+        trigger_config = {}
+
+    root = tk.Tk()
+    root.title("Trigger Manager")
+
+    checkbox_vars = {}
+    priority_entries = {}
+
+    def save_settings():
+        updated_config = {}
+        for trigger, var in checkbox_vars.items():
+            priority_val = priority_entries[trigger].get()
+            try:
+                priority = int(priority_val)
+            except ValueError:
+                priority = 1
+
+            existing = trigger_config.get(trigger, {})
+            category = existing.get("category", "Uncategorized")
+
+            updated_config[trigger] = {
+                "enabled": var.get(),
+                "priority": priority,
+                "category": category
+            }
+
+        with open("trigger_config.json", "w") as f:
+            json.dump(updated_config, f, indent=4)
+
+        status_label.config(text="Settings saved!", foreground="green")
+        root.after(3000, lambda: status_label.config(text=""))
+
+    # === Scrollable Frame Setup ===
+    canvas = tk.Canvas(root, height=400)
+    scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
+    scrollable_frame = ttk.Frame(canvas)
+
+    scrollable_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(
+            scrollregion=canvas.bbox("all")
+        )
+    )
+
+    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+
+    # === Trigger Widgets ===
+    for trigger, settings in trigger_config.items():
+        frame = ttk.Frame(scrollable_frame)
+        frame.pack(fill='x', padx=10, pady=3)
+
+        var = tk.BooleanVar(value=settings.get("enabled", False))
+        checkbox = ttk.Checkbutton(frame, text=trigger, variable=var)
+        checkbox.pack(side='left')
+        checkbox_vars[trigger] = var
+
+        ttk.Label(frame, text="Priority:").pack(side='left', padx=(10, 0))
+        entry = ttk.Entry(frame, width=5)
+        entry.insert(0, str(settings.get("priority", 1)))
+        entry.pack(side='left')
+        priority_entries[trigger] = entry
+
+    # === Save Button & Status ===
+    ttk.Button(root, text="Save", command=save_settings).pack(pady=10)
+    status_label = ttk.Label(root, text="")
+    status_label.pack()
+
+    root.mainloop()
+
             
 # =============================================================================
 # Driver Program (main)
@@ -2043,12 +4093,19 @@ if __name__ == "__main__":
 
     central_tz = pytz.timezone("America/Chicago")
     fetcher = Fetcher(args.initial_newer_than, args.saveload, args.wid)
+    print(f"\033[93mCONFIG → World ID set to: {args.wid}\033[0m")
+    
+    # Start Trigger Manager GUI in a separate thread
+    gui_thread = threading.Thread(target=launch_trigger_manager)
+    gui_thread.daemon = True
+    gui_thread.start()
 
     # Start a new thread for updating positions every 3 seconds
     position_thread = threading.Thread(target=fetcher.update_positions_every_3_seconds)
     position_thread.daemon = True  # This makes sure the thread will exit when the main program exits
     position_thread.start()
 
+    '''
     while True:
         fetcher.on_wakeup()
         
@@ -2078,3 +4135,38 @@ if __name__ == "__main__":
         
         print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
         sleep(10)  # run checks every 10 seconds
+    '''
+    
+    while True:
+        fetcher.on_wakeup()
+        
+        print(f"\033[96mon_wakeup() finished- {datetime.now(central_tz)}\033[0m\n")
+        
+        current_time = datetime.now().timestamp()
+
+        # === Trigger Settings ===
+        random_trigger_name = "check_random_checkin"
+        random_enabled, random_priority, category = get_trigger_settings(random_trigger_name)
+
+        if (
+            current_time - fetcher.last_trigger_time > 300  # 5 minutes
+        ):
+            if not fetcher.triggers_list:  # Only send if no other triggers are pending
+                if random_enabled:
+                    online_students = fetcher.players["online_user"].tolist()
+                    if online_students:
+                        random_student = random.choice(online_students)
+                        trigger_message = f"Random check-in. Category: {category}"
+                        print(
+                            f"\033[92m \nSending random trigger to '{random_student}' on next wakeup. \033[0m"
+                        )
+                        fetcher.triggers_list.append((trigger_message, random_student, random_priority))
+                        fetcher.last_trigger_time = current_time
+                else:
+                    print(f"\033[90mSkipping {random_trigger_name} (priority {random_priority}) — disabled in Trigger Manager.\033[0m")
+
+        fetcher.save_tools_usage()
+
+        now = datetime.now(central_tz)
+        print(f"\033[96mFinished work at ---- {now}. \n^- \033[0mSleeping for 10 seconds.")
+        sleep(10)
