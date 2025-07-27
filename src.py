@@ -2244,9 +2244,6 @@ class Fetcher:
 
         for user, data in self.tools_usage.items():
             worlds_visited = data["worlds_visited"]
-            print("Dataframe debugging:")
-            print(data)
-            quit()
             current_world = data["current_world"]
             world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
 
@@ -2851,6 +2848,8 @@ class Fetcher:
                     message = row["message"]
                     for tool in multi_use_tools + single_use_tools:
                         if f"/{tool}" in message:
+                            if "tool_use_count" not in self.tools_usage[user]:
+                                self.tools_usage[user]["tool_use_count"] = 0
                             self.tools_usage[user]["tool_use_count"] += 1
                             tool_key = f"{tool}_{current_world}"
                             self.tools_usage[user].setdefault(tool_key, 0)
