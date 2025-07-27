@@ -2244,7 +2244,7 @@ class Fetcher:
 
         for user, data in self.tools_usage.items():
             worlds_visited = data["worlds_visited"]
-            print("Displaying dataframe:")
+            print("Dataframe debugging:")
             print(data)
             current_world = data["current_world"]
             world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
