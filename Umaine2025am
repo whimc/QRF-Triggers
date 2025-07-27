@@ -5,7 +5,7 @@
     "tool_use_count": 0,
     "total_observation_count": 0,
     "world_observation_counts": {},
-    "last_observation_time": 0,
+    "last_observation_time": 1753658339.592081,
     "mynoa_start_time": null,
     "mynoa_trigger_fired": false,
     "recent_positions": [
@@ -16,6 +16,6 @@
     ],
     "recent_observations": [],
     "tool_usage_timestamps": [],
-    "last_tool_use_time": 0
+    "last_tool_use_time": 1753658339.592081
   }
 }
