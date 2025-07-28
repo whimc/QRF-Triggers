@@ -503,6 +503,22 @@ class Fetcher:
         self.block_breaks_already_triggered = set()
         self.unowned_region_already_triggered = set()
 
+    def _ensure_user_schema(self, user: str, world: str, position_time: float):
+        d = self.tools_usage.setdefault(user, {})
+        d.setdefault("worlds_visited", [world])
+        d.setdefault("current_world", world)
+        d.setdefault("tool_use_count", 0)
+        d.setdefault("total_observation_count", 0)
+        d.setdefault("world_observation_counts", {world: 0})
+        d.setdefault("last_observation_time", position_time)
+        d.setdefault("mynoa_start_time", None)
+        d.setdefault("mynoa_trigger_fired", False)
+        d.setdefault("recent_positions", [])
+        d.setdefault("recent_observations", [])
+        d.setdefault("tool_usage_timestamps", [])
+        d.setdefault("last_tool_use_time", 0)
+        return d
+
     '''
     def save_tools_usage(self):
         if self.saveload_file:
@@ -2100,203 +2116,123 @@ class Fetcher:
                 self.tools_usage[user]["mynoa_trigger_fired"] = False
 
 
-    def update_observation_usage(self):
-        central_tz = pytz.timezone("America/Chicago")
+def update_observation_usage(self):
+    """
+    Ingest rows from self.observations and update:
+      - self.tools_usage[user] (counts, last_observation_time, etc.)
+      - self.observations_record[world] (for spatial/semantic proximity checks)
+      - self.triggers_list (when triggers fire)
+    """
+    central_tz = pytz.timezone("America/Chicago")
 
-        for _, row in self.observations.iterrows():
-            user = row["username"]
-            world = row["world"]
-            position_time = row["time"]
+    # Ensure the container exists
+    if not hasattr(self, "observations_record"):
+        self.observations_record = {}
 
+    def _to_epoch_central(ts):
+        """Robustly convert a value coming from SQL/pandas to a tz-aware epoch (float, seconds)."""
+        # Pandas Timestamp
+        if isinstance(ts, pd.Timestamp):
+            if ts.tzinfo is None:
+                ts = ts.tz_localize(pytz.UTC)
+            return ts.astimezone(central_tz).timestamp()
 
-            # Convert position_time to a string if it's a Timestamp
-            if isinstance(position_time, pd.Timestamp):
-                position_time = position_time.strftime("%Y-%m-%d %H:%M:%S")
+        # datetime
+        if isinstance(ts, datetime):
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=pytz.UTC)
+            return ts.astimezone(central_tz).timestamp()
 
-            # Convert position_time to a timestamp in central timezone
-            position_time = datetime.strptime(position_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=central_tz).timestamp()
+        # number (ms or s)
+        if isinstance(ts, (int, float)):
+            # Heuristic: if it's too large, treat as ms
+            if ts > 1e12:
+                ts = ts / 1000.0
+            # treat as UTC seconds
+            return datetime.fromtimestamp(ts, pytz.UTC).astimezone(central_tz).timestamp()
 
-            x = row["x"]
-            z = row["z"]
-            observation_text = row["observation"]
+        # string "YYYY-mm-dd HH:MM:SS"
+        if isinstance(ts, str):
+            try:
+                dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC)
+                return dt.astimezone(central_tz).timestamp()
+            except Exception:
+                pass
 
-            # Add the observation to the record, organized by world
-            if world not in self.observations_record:
-                self.observations_record[world] = []
-            self.observations_record[world].append((x, z, user, observation_text))
+        # Fallback: now
+        return datetime.now(central_tz).timestamp()
 
-            # Check for nearby observations
-            '''
-            for obs_x, obs_z, obs_user, obs_text in self.observations_record[world]:
-                distance = abs(x - obs_x) + abs(z - obs_z)  # Manhattan distance
+    # Settings for the "nearby & similar observation" trigger
+    trigger_name_near = "check_nearby_similar_observation"
+    enabled_near, priority_near, category_near = get_trigger_settings(trigger_name_near)
+
+    # Iterate over observations
+    for _, row in self.observations.iterrows():
+        user = row.get("username")
+        world = row.get("world")
+        x = row.get("x")
+        z = row.get("z")
+        observation_text = row.get("observation", "") or ""
+
+        raw_time = row.get("time")
+        position_time = _to_epoch_central(raw_time)
+
+        # Ensure user schema (prevents all the KeyErrors you were seeing)
+        data = self._ensure_user_schema(user, world, position_time)
+
+        # Keep an index of all observations by world
+        world_list = self.observations_record.setdefault(world, [])
+        world_list.append((x, z, user, observation_text))
+
+        # --- Optional: nearby & similar observation trigger ---
+        if enabled_near:
+            # Simple Manhattan distance check
+            for obs_x, obs_z, obs_user, obs_text in world_list[:-1]:  # skip the one we just appended
+                distance = abs(x - obs_x) + abs(z - obs_z)
                 if 0 < distance < 10:
                     similarity = difflib.SequenceMatcher(None, observation_text, obs_text).ratio()
-                    print(f"obs distance is: {distance}, similarity is: {similarity}")
-
-                    trigger_message = f"{user} made an observation near another observation in {world}. Difflib similarity is {similarity}"
-                    print(trigger_message)
-                    self.triggers_list.append((trigger_message, user, 5))
-                    break  # Exit after finding one nearby observation to avoid multiple triggers for the same event
-            '''
-
-            # Check for nearby observations
-            for obs_x, obs_z, obs_user, obs_text in self.observations_record[world]:
-                distance = abs(x - obs_x) + abs(z - obs_z)  # Manhattan distance
-                if 0 < distance < 10:
-                    similarity = difflib.SequenceMatcher(None, observation_text, obs_text).ratio()
-
-                    # Trigger Manager Integration
-                    trigger_name = "check_nearby_similar_observation"
-                    enabled, priority, category = get_trigger_settings(trigger_name)
-
-                    if not enabled:
-                        print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
-                        break
-
                     print(f"obs distance is: {distance}, similarity is: {similarity:.2f}")
+
                     trigger_message = (
                         f"{user} made an observation near another observation in {world}. "
-                        f"Similarity: {similarity:.2f}. Category: {category}"
+                        f"Similarity: {similarity:.2f}. Category: {category_near}"
                     )
                     print(trigger_message)
-                    self.triggers_list.append((trigger_message, user, priority))
-                    break  # Exit after finding one nearby observation to avoid multiple triggers
+                    self.triggers_list.append((trigger_message, user, priority_near))
+                    break  # one trigger per new obs
 
+        # ---- Update counters for the user ----
+        data["current_world"] = world
+        data["last_observation_time"] = position_time
 
-            if user not in self.tools_usage:
-                self.tools_usage[user] = {
-                    "worlds_visited": [world],
-                    "current_world": world,
-                    "total_observation_count": 0,  # For overall observation count
-                    "world_observation_counts": {world: 0},  # For per-world observation count
-                    "last_observation_time": position_time,  # Initialize last observation time
-                    "recent_observations": [position_time],  # Initialize recent observations list
-                }
-            else:
-                self.tools_usage[user]["total_observation_count"] += 1
-                self.tools_usage[user]["current_world"] = world
-                self.tools_usage[user]["last_observation_time"] = position_time  # Update last observation time
+        if world not in data["worlds_visited"]:
+            data["worlds_visited"].append(world)
 
-                if world not in self.tools_usage[user]["worlds_visited"]:
-                    self.tools_usage[user]["worlds_visited"].append(world)
+        # per-world counters
+        data["world_observation_counts"].setdefault(world, 0)
+        data["world_observation_counts"][world] += 1
 
-                if world not in self.tools_usage[user]["world_observation_counts"]:
-                    self.tools_usage[user]["world_observation_counts"][world] = 0
+        # total counter
+        data["total_observation_count"] += 1
 
-                self.tools_usage[user]["world_observation_counts"][world] += 1
+        # sliding window (2 minutes)
+        data.setdefault("recent_observations", []).append(position_time)
+        now_epoch = datetime.now(central_tz).timestamp()
+        data["recent_observations"] = [
+            t for t in data["recent_observations"] if now_epoch - t <= 2 * 60
+        ]
 
-                # Add the current observation time to the list of recent observations
-                self.tools_usage[user].setdefault("recent_observations", []).append(position_time)
+        # ---- Check if this observation happened in a "build map" (GLOBAL_WID) ----
+        try:
+            wid = self.get_wid_for_world(world)  # your method; make sure it returns an int or None
+        except Exception as e:
+            print(f"[WARN] get_wid_for_world({world}) failed: {e}")
+            wid = None
 
-                # Keep only the observations from the last 2 minutes
-                current_time = datetime.now(central_tz).timestamp()
-                self.tools_usage[user]["recent_observations"] = [
-                    t for t in self.tools_usage[user]["recent_observations"] if current_time - t <= 2 * 60
-                ]
-
-            # Check if the world is "mars" or "sdp7"
-            if world.lower() in ["mars", "sdp7"]:
-                trigger_message = f"{user} made an observation in {world}."
-                self.triggers_list.append((trigger_message, user, 2))
-                print(trigger_message)
-
-        '''
-        for user, data in self.tools_usage.items():
-            worlds_visited = data["worlds_visited"]
-            current_world = data["current_world"]
-            world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
-
-            # Check for lack of observations
-            if len(worlds_visited) >= 3:
-                trigger_key = f"no_observations_since_third_{current_world}"
-                if not data.get(trigger_key, False):
-                    if len(worlds_visited) == 3 and world_observation_count == 0:
-                        trigger_message = f"{user} has not made any observations by the third world."
-                        print(trigger_message)
-                        self.triggers_list.append((trigger_message, user, 2))
-                        data[trigger_key] = True
-                    elif len(worlds_visited) > 3 and world_observation_count == 0:
-                        trigger_message = f"{user} has visited {len(worlds_visited)} worlds without making any observations."
-                        print(trigger_message)
-                        self.triggers_list.append((trigger_message, user, 2))
-                        data[trigger_key] = True
-
-            # High observation counts check
-            high_obs_trigger_key = f"high_observations_{current_world}"
-            if len(worlds_visited) <= 3 and world_observation_count > 10:  # 10
-                if not data.get(high_obs_trigger_key, False):
-                    print(f"{user} has made more than 10 observations in {current_world}.")
-                    self.triggers_list.append((f"{user} has high observation count in {current_world}", user, 7))
-                    data[high_obs_trigger_key] = True
-            elif len(worlds_visited) > 3 and world_observation_count > 5:  # 5
-                if not data.get(high_obs_trigger_key, False):
-                    print(f"{user} has made more than 5 observations in {current_world} after visiting 3 worlds.")
-                    self.triggers_list.append((f"{user} has high observation count in {current_world}", user, 7))
-                    data[high_obs_trigger_key] = True
-            
-            
-            if len(worlds_visited) > 0 and world_observation_count >= 5:  # 5
-                if not data.get(high_obs_trigger_key, False):
-                    print(f"{user} has made 5 observations in {current_world}.")
-                    self.triggers_list.append((f"{user} has made 5 observations in {current_world}", user, 7))
-                    data[high_obs_trigger_key] = True
-        '''
-
-        for user, data in self.tools_usage.items():
-            worlds_visited = data["worlds_visited"]
-            current_world = data["current_world"]
-            world_observation_count = data.get("world_observation_counts", {}).get(current_world, 0)
-
-            # === Trigger: no_observations_by_third_world ===
-            trigger_name = "no_observations_by_third_world"
-            enabled, priority, category = get_trigger_settings(trigger_name)
-            if enabled and len(worlds_visited) >= 3:
-                trigger_key = f"no_observations_since_third_{current_world}"
-                if not data.get(trigger_key, False):
-                    if len(worlds_visited) == 3 and world_observation_count == 0:
-                        trigger_message = f"{user} has not made any observations by the third world. Category: {category}"
-                        print(trigger_message)
-                        self.triggers_list.append((trigger_message, user, priority))
-                        data[trigger_key] = True
-                    elif len(worlds_visited) > 3 and world_observation_count == 0:
-                        trigger_message = f"{user} has visited {len(worlds_visited)} worlds without making any observations. Category: {category}"
-                        print(trigger_message)
-                        self.triggers_list.append((trigger_message, user, priority))
-                        data[trigger_key] = True
-            elif not enabled:
-                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
-
-            # === Trigger: high_observation_count ===
-            trigger_name = "high_observation_count"
-            enabled, priority, category = get_trigger_settings(trigger_name)
-            high_obs_trigger_key = f"high_observations_{current_world}"
-            if enabled:
-                if len(worlds_visited) <= 3 and world_observation_count > 10:
-                    if not data.get(high_obs_trigger_key, False):
-                        trigger_message = f"{user} has made more than 10 observations in {current_world}. Category: {category}"
-                        print(trigger_message)
-                        self.triggers_list.append((trigger_message, user, priority))
-                        data[high_obs_trigger_key] = True
-                elif len(worlds_visited) > 3 and world_observation_count > 5:
-                    if not data.get(high_obs_trigger_key, False):
-                        trigger_message = f"{user} has made more than 5 observations in {current_world} after visiting 3 worlds. Category: {category}"
-                        print(trigger_message)
-                        self.triggers_list.append((trigger_message, user, priority))
-                        data[high_obs_trigger_key] = True
-            else:
-                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
-
-            # === Trigger: reached_5_observations_in_world ===
-            trigger_name = "reached_5_observations_in_world"
-            enabled, priority, category = get_trigger_settings(trigger_name)
-            if enabled and len(worlds_visited) > 0 and world_observation_count >= 5:
-                if not data.get(high_obs_trigger_key, False):  # reuse key for simplicity
-                    trigger_message = f"{user} has made 5 observations in {current_world}. Category: {category}"
-                    print(trigger_message)
-                    self.triggers_list.append((trigger_message, user, priority))
-                    data[high_obs_trigger_key] = True
-            elif not enabled:
-                print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
+        if wid is not None and wid in GLOBAL_WID:
+            trigger_message = f"{user} made an observation in {world}."
+            self.triggers_list.append((trigger_message, user, 2))
+            print(trigger_message)
 
 
 
