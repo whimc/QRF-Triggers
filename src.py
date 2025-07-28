@@ -15,10 +15,10 @@ GLOBAL_WID = [134]
 # =============================================================================
 
 import json
-import signal
+#import signal
 import sys
 from argparse import ArgumentParser, ArgumentTypeError
-from datetime import datetime
+#from datetime import datetime
 from pathlib import Path
 from time import sleep, time
 
@@ -26,7 +26,7 @@ import pandas as pd
 import sqlalchemy as db
 from websockets.sync.client import connect
 
-from datetime import datetime
+#from datetime import datetime
 import pytz
 
 import os
@@ -37,7 +37,7 @@ from difflib import SequenceMatcher
 
 import re
 from shapely.geometry import Polygon, Point
-import math
+#import math
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -377,8 +377,9 @@ def send_trigger(trigger_name: str, username: str, priority: int):
             "priority": priority,
         },
     }
+    from typing import Any, Dict
+    payload: Dict[str, Dict[str, Any]] = {"data": {}}
     payload["data"]["masterlogs"] = {
-        **payload["data"],
         "reviewer": "",
         "end": "",
         "feedbackTXT": "",
