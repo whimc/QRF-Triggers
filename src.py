@@ -1,5 +1,5 @@
-# Based on 22 July 2025 version from Neithan
-# modified by Geph for U Maine QRF camp 28 July to 1 August 2025
+# Based on 28 July 2025 version from Neithan
+# modified by Geph/Stefan/GPT for U Maine QRF camp 28 July to 1 August 2025
 
 #127 = SDP12 junior high at Fiske - ideal for demos
 #129 = uncc25am beginners at UNCC
@@ -497,6 +497,13 @@ class Fetcher:
         if saveload_file and os.path.exists(saveload_file):
             with open(saveload_file, "r") as f:
                 self.tools_usage = json.load(f)
+
+            # Convert 'explored_worlds' from list back to set
+            # July 28 fix from Neithan
+            for username, user_data in self.tools_usage.items():
+                if "explored_worlds" in user_data and isinstance(user_data["explored_worlds"], list):
+                    user_data["explored_worlds"] = set(user_data["explored_worlds"])
+
         else:
             self.tools_usage = {}
 
