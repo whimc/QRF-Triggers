@@ -4959,10 +4959,12 @@ def launch_trigger_manager():
 '''
 
 def launch_trigger_manager():
+    '''
     if threading.current_thread() is not threading.main_thread():
         print("[WARN] Tkinter must run on the main thread. Skipping GUI.")
         return
     else:
+    '''
         import tkinter as tk
         from tkinter import ttk
         import json
