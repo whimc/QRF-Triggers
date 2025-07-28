@@ -382,9 +382,19 @@ def send_trigger(trigger_name: str, username: str, priority: int):
             "priority": priority,
         },
     }
+    '''
     from typing import Any, Dict
     payload: Dict[str, Dict[str, Any]] = {"data": {}}
     payload["data"]["masterlogs"] = {
+        "reviewer": "",
+        "end": "",
+        "feedbackTXT": "",
+        "feedbackREC": "",
+    }
+    '''
+
+    payload["data"]["masterlogs"] = {
+        **payload["data"],
         "reviewer": "",
         "end": "",
         "feedbackTXT": "",
