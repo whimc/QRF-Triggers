@@ -2116,123 +2116,123 @@ class Fetcher:
                 self.tools_usage[user]["mynoa_trigger_fired"] = False
 
 
-def update_observation_usage(self):
-    """
-    Ingest rows from self.observations and update:
-      - self.tools_usage[user] (counts, last_observation_time, etc.)
-      - self.observations_record[world] (for spatial/semantic proximity checks)
-      - self.triggers_list (when triggers fire)
-    """
-    central_tz = pytz.timezone("America/Chicago")
+    def update_observation_usage(self):
+        """
+        Ingest rows from self.observations and update:
+          - self.tools_usage[user] (counts, last_observation_time, etc.)
+          - self.observations_record[world] (for spatial/semantic proximity checks)
+          - self.triggers_list (when triggers fire)
+        """
+        central_tz = pytz.timezone("America/Chicago")
 
-    # Ensure the container exists
-    if not hasattr(self, "observations_record"):
-        self.observations_record = {}
+        # Ensure the container exists
+        if not hasattr(self, "observations_record"):
+            self.observations_record = {}
 
-    def _to_epoch_central(ts):
-        """Robustly convert a value coming from SQL/pandas to a tz-aware epoch (float, seconds)."""
-        # Pandas Timestamp
-        if isinstance(ts, pd.Timestamp):
-            if ts.tzinfo is None:
-                ts = ts.tz_localize(pytz.UTC)
-            return ts.astimezone(central_tz).timestamp()
+        def _to_epoch_central(ts):
+            """Robustly convert a value coming from SQL/pandas to a tz-aware epoch (float, seconds)."""
+            # Pandas Timestamp
+            if isinstance(ts, pd.Timestamp):
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize(pytz.UTC)
+                return ts.astimezone(central_tz).timestamp()
 
-        # datetime
-        if isinstance(ts, datetime):
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=pytz.UTC)
-            return ts.astimezone(central_tz).timestamp()
+            # datetime
+            if isinstance(ts, datetime):
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=pytz.UTC)
+                return ts.astimezone(central_tz).timestamp()
 
-        # number (ms or s)
-        if isinstance(ts, (int, float)):
-            # Heuristic: if it's too large, treat as ms
-            if ts > 1e12:
-                ts = ts / 1000.0
-            # treat as UTC seconds
-            return datetime.fromtimestamp(ts, pytz.UTC).astimezone(central_tz).timestamp()
+            # number (ms or s)
+            if isinstance(ts, (int, float)):
+                # Heuristic: if it's too large, treat as ms
+                if ts > 1e12:
+                    ts = ts / 1000.0
+                # treat as UTC seconds
+                return datetime.fromtimestamp(ts, pytz.UTC).astimezone(central_tz).timestamp()
 
-        # string "YYYY-mm-dd HH:MM:SS"
-        if isinstance(ts, str):
+            # string "YYYY-mm-dd HH:MM:SS"
+            if isinstance(ts, str):
+                try:
+                    dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC)
+                    return dt.astimezone(central_tz).timestamp()
+                except Exception:
+                    pass
+
+            # Fallback: now
+            return datetime.now(central_tz).timestamp()
+
+        # Settings for the "nearby & similar observation" trigger
+        trigger_name_near = "check_nearby_similar_observation"
+        enabled_near, priority_near, category_near = get_trigger_settings(trigger_name_near)
+
+        # Iterate over observations
+        for _, row in self.observations.iterrows():
+            user = row.get("username")
+            world = row.get("world")
+            x = row.get("x")
+            z = row.get("z")
+            observation_text = row.get("observation", "") or ""
+
+            raw_time = row.get("time")
+            position_time = _to_epoch_central(raw_time)
+
+            # Ensure user schema (prevents all the KeyErrors you were seeing)
+            data = self._ensure_user_schema(user, world, position_time)
+
+            # Keep an index of all observations by world
+            world_list = self.observations_record.setdefault(world, [])
+            world_list.append((x, z, user, observation_text))
+
+            # --- Optional: nearby & similar observation trigger ---
+            if enabled_near:
+                # Simple Manhattan distance check
+                for obs_x, obs_z, obs_user, obs_text in world_list[:-1]:  # skip the one we just appended
+                    distance = abs(x - obs_x) + abs(z - obs_z)
+                    if 0 < distance < 10:
+                        similarity = difflib.SequenceMatcher(None, observation_text, obs_text).ratio()
+                        print(f"obs distance is: {distance}, similarity is: {similarity:.2f}")
+
+                        trigger_message = (
+                            f"{user} made an observation near another observation in {world}. "
+                            f"Similarity: {similarity:.2f}. Category: {category_near}"
+                        )
+                        print(trigger_message)
+                        self.triggers_list.append((trigger_message, user, priority_near))
+                        break  # one trigger per new obs
+
+            # ---- Update counters for the user ----
+            data["current_world"] = world
+            data["last_observation_time"] = position_time
+
+            if world not in data["worlds_visited"]:
+                data["worlds_visited"].append(world)
+
+            # per-world counters
+            data["world_observation_counts"].setdefault(world, 0)
+            data["world_observation_counts"][world] += 1
+
+            # total counter
+            data["total_observation_count"] += 1
+
+            # sliding window (2 minutes)
+            data.setdefault("recent_observations", []).append(position_time)
+            now_epoch = datetime.now(central_tz).timestamp()
+            data["recent_observations"] = [
+                t for t in data["recent_observations"] if now_epoch - t <= 2 * 60
+            ]
+
+            # ---- Check if this observation happened in a "build map" (GLOBAL_WID) ----
             try:
-                dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC)
-                return dt.astimezone(central_tz).timestamp()
-            except Exception:
-                pass
+                wid = self.get_wid_for_world(world)  # your method; make sure it returns an int or None
+            except Exception as e:
+                print(f"[WARN] get_wid_for_world({world}) failed: {e}")
+                wid = None
 
-        # Fallback: now
-        return datetime.now(central_tz).timestamp()
-
-    # Settings for the "nearby & similar observation" trigger
-    trigger_name_near = "check_nearby_similar_observation"
-    enabled_near, priority_near, category_near = get_trigger_settings(trigger_name_near)
-
-    # Iterate over observations
-    for _, row in self.observations.iterrows():
-        user = row.get("username")
-        world = row.get("world")
-        x = row.get("x")
-        z = row.get("z")
-        observation_text = row.get("observation", "") or ""
-
-        raw_time = row.get("time")
-        position_time = _to_epoch_central(raw_time)
-
-        # Ensure user schema (prevents all the KeyErrors you were seeing)
-        data = self._ensure_user_schema(user, world, position_time)
-
-        # Keep an index of all observations by world
-        world_list = self.observations_record.setdefault(world, [])
-        world_list.append((x, z, user, observation_text))
-
-        # --- Optional: nearby & similar observation trigger ---
-        if enabled_near:
-            # Simple Manhattan distance check
-            for obs_x, obs_z, obs_user, obs_text in world_list[:-1]:  # skip the one we just appended
-                distance = abs(x - obs_x) + abs(z - obs_z)
-                if 0 < distance < 10:
-                    similarity = difflib.SequenceMatcher(None, observation_text, obs_text).ratio()
-                    print(f"obs distance is: {distance}, similarity is: {similarity:.2f}")
-
-                    trigger_message = (
-                        f"{user} made an observation near another observation in {world}. "
-                        f"Similarity: {similarity:.2f}. Category: {category_near}"
-                    )
-                    print(trigger_message)
-                    self.triggers_list.append((trigger_message, user, priority_near))
-                    break  # one trigger per new obs
-
-        # ---- Update counters for the user ----
-        data["current_world"] = world
-        data["last_observation_time"] = position_time
-
-        if world not in data["worlds_visited"]:
-            data["worlds_visited"].append(world)
-
-        # per-world counters
-        data["world_observation_counts"].setdefault(world, 0)
-        data["world_observation_counts"][world] += 1
-
-        # total counter
-        data["total_observation_count"] += 1
-
-        # sliding window (2 minutes)
-        data.setdefault("recent_observations", []).append(position_time)
-        now_epoch = datetime.now(central_tz).timestamp()
-        data["recent_observations"] = [
-            t for t in data["recent_observations"] if now_epoch - t <= 2 * 60
-        ]
-
-        # ---- Check if this observation happened in a "build map" (GLOBAL_WID) ----
-        try:
-            wid = self.get_wid_for_world(world)  # your method; make sure it returns an int or None
-        except Exception as e:
-            print(f"[WARN] get_wid_for_world({world}) failed: {e}")
-            wid = None
-
-        if wid is not None and wid in GLOBAL_WID:
-            trigger_message = f"{user} made an observation in {world}."
-            self.triggers_list.append((trigger_message, user, 2))
-            print(trigger_message)
+            if wid is not None and wid in GLOBAL_WID:
+                trigger_message = f"{user} made an observation in {world}."
+                self.triggers_list.append((trigger_message, user, 2))
+                print(trigger_message)
 
 
 
