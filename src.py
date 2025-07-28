@@ -43,6 +43,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import threading
+
 from collections import defaultdict
 
 from datetime import datetime, timedelta
@@ -4945,86 +4946,90 @@ def launch_trigger_manager():
 '''
 
 def launch_trigger_manager():
-    import tkinter as tk
-    from tkinter import ttk
-    import json
+    if threading.current_thread() is not threading.main_thread():
+        print("[WARN] Tkinter must run on the main thread. Skipping GUI.")
+        return
+    else:
+        import tkinter as tk
+        from tkinter import ttk
+        import json
 
-    try:
-        with open("trigger_config.json", "r") as f:
-            trigger_config = json.load(f)
-    except FileNotFoundError:
-        trigger_config = {}
+        try:
+            with open("trigger_config.json", "r") as f:
+                trigger_config = json.load(f)
+        except FileNotFoundError:
+            trigger_config = {}
 
-    root = tk.Tk()
-    root.title("Trigger Manager")
+        root = tk.Tk()
+        root.title("Trigger Manager")
 
-    checkbox_vars = {}
-    priority_entries = {}
+        checkbox_vars = {}
+        priority_entries = {}
 
-    def save_settings():
-        updated_config = {}
-        for trigger, var in checkbox_vars.items():
-            priority_val = priority_entries[trigger].get()
-            try:
-                priority = int(priority_val)
-            except ValueError:
-                priority = 1
+        def save_settings():
+            updated_config = {}
+            for trigger, var in checkbox_vars.items():
+                priority_val = priority_entries[trigger].get()
+                try:
+                    priority = int(priority_val)
+                except ValueError:
+                    priority = 1
 
-            existing = trigger_config.get(trigger, {})
-            category = existing.get("category", "Uncategorized")
+                existing = trigger_config.get(trigger, {})
+                category = existing.get("category", "Uncategorized")
 
-            updated_config[trigger] = {
-                "enabled": var.get(),
-                "priority": priority,
-                "category": category
-            }
+                updated_config[trigger] = {
+                    "enabled": var.get(),
+                    "priority": priority,
+                    "category": category
+                }
 
-        with open("trigger_config.json", "w") as f:
-            json.dump(updated_config, f, indent=4)
+            with open("trigger_config.json", "w") as f:
+                json.dump(updated_config, f, indent=4)
 
-        status_label.config(text="Settings saved!", foreground="green")
-        root.after(3000, lambda: status_label.config(text=""))
+            status_label.config(text="Settings saved!", foreground="green")
+            root.after(3000, lambda: status_label.config(text=""))
 
-    # === Scrollable Frame Setup ===
-    canvas = tk.Canvas(root, height=400)
-    scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
-    scrollable_frame = ttk.Frame(canvas)
+        # === Scrollable Frame Setup ===
+        canvas = tk.Canvas(root, height=400)
+        scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
 
-    scrollable_frame.bind(
-        "<Configure>",
-        lambda e: canvas.configure(
-            scrollregion=canvas.bbox("all")
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
         )
-    )
 
-    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-    canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
 
-    canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
-    # === Trigger Widgets ===
-    for trigger, settings in trigger_config.items():
-        frame = ttk.Frame(scrollable_frame)
-        frame.pack(fill='x', padx=10, pady=3)
+        # === Trigger Widgets ===
+        for trigger, settings in trigger_config.items():
+            frame = ttk.Frame(scrollable_frame)
+            frame.pack(fill='x', padx=10, pady=3)
 
-        var = tk.BooleanVar(value=settings.get("enabled", False))
-        checkbox = ttk.Checkbutton(frame, text=trigger, variable=var)
-        checkbox.pack(side='left')
-        checkbox_vars[trigger] = var
+            var = tk.BooleanVar(value=settings.get("enabled", False))
+            checkbox = ttk.Checkbutton(frame, text=trigger, variable=var)
+            checkbox.pack(side='left')
+            checkbox_vars[trigger] = var
 
-        ttk.Label(frame, text="Priority:").pack(side='left', padx=(10, 0))
-        entry = ttk.Entry(frame, width=5)
-        entry.insert(0, str(settings.get("priority", 1)))
-        entry.pack(side='left')
-        priority_entries[trigger] = entry
+            ttk.Label(frame, text="Priority:").pack(side='left', padx=(10, 0))
+            entry = ttk.Entry(frame, width=5)
+            entry.insert(0, str(settings.get("priority", 1)))
+            entry.pack(side='left')
+            priority_entries[trigger] = entry
 
-    # === Save Button & Status ===
-    ttk.Button(root, text="Save", command=save_settings).pack(pady=10)
-    status_label = ttk.Label(root, text="")
-    status_label.pack()
+        # === Save Button & Status ===
+        ttk.Button(root, text="Save", command=save_settings).pack(pady=10)
+        status_label = ttk.Label(root, text="")
+        status_label.pack()
 
-    root.mainloop()
+        root.mainloop()
 
 
 # =============================================================================
