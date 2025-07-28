@@ -4891,75 +4891,9 @@ class Fetcher:
 # Trigger Manager
 # =============================================================================
 
-'''
-def launch_trigger_manager():
-    import tkinter as tk
-    from tkinter import ttk
-
-    try:
-        with open("trigger_config.json", "r") as f:
-            trigger_config = json.load(f)
-    except FileNotFoundError:
-        trigger_config = {}
-
-    root = tk.Tk()
-    root.title("Trigger Manager")
-
-    checkbox_vars = {}
-    priority_entries = {}
-
-
-    
-    def save_settings():
-        updated_config = {}
-        for trigger, var in checkbox_vars.items():
-            priority_val = priority_entries[trigger].get()
-            try:
-                priority = int(priority_val)
-            except ValueError:
-                priority = 1
-
-            # Preserve existing category if present
-            existing = trigger_config.get(trigger, {})
-            category = existing.get("category", "Uncategorized")
-
-            updated_config[trigger] = {
-                "enabled": var.get(),
-                "priority": priority,
-                "category": category
-            }
-
-        with open("trigger_config.json", "w") as f:
-            json.dump(updated_config, f, indent=4)
-
-        status_label.config(text="Settings saved!", foreground="green")
-        root.after(3000, lambda: status_label.config(text=""))
-
-
-    for trigger, settings in trigger_config.items():
-        frame = ttk.Frame(root)
-        frame.pack(fill='x', padx=10, pady=3)
-
-        var = tk.BooleanVar(value=settings.get("enabled", False))
-        checkbox = ttk.Checkbutton(frame, text=trigger, variable=var)
-        checkbox.pack(side='left')
-        checkbox_vars[trigger] = var
-
-        ttk.Label(frame, text="Priority:").pack(side='left', padx=(10, 0))
-        entry = ttk.Entry(frame, width=5)
-        entry.insert(0, str(settings.get("priority", 1)))
-        entry.pack(side='left')
-        priority_entries[trigger] = entry
-
-    ttk.Button(root, text="Save", command=save_settings).pack(pady=10)
-    status_label = ttk.Label(root, text="")
-    status_label.pack()
-
-    root.mainloop()
-'''
-
 def launch_trigger_manager():
     '''
+    # for running locally on IntelliJ - Geph, not required or desired
     if threading.current_thread() is not threading.main_thread():
         print("[WARN] Tkinter must run on the main thread. Skipping GUI.")
         return
