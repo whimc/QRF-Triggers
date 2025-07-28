@@ -48,6 +48,11 @@ from collections import defaultdict
 
 from datetime import datetime, timedelta
 
+import socket
+from typing import Optional
+
+SOCKET: Optional[socket.socket] = None
+
 # =============================================================================
 # Trigger Manager
 # =============================================================================
@@ -5041,9 +5046,10 @@ if __name__ == "__main__":
     import signal
 
     def handle_sigint(sig, frame):
-        # Prevent Ctrl+C from hanging
-        if SOCKET:
-            SOCKET.close()
+        global SOCKET
+        s = SOCKET                  # <- narrow the type for the checker
+        if s is not None:
+            s.close()
         print("Stopping!")
         sys.exit(0)
 
