@@ -363,7 +363,7 @@ where w.world = 'Umaine25am'
 
 
 block_trigger_cooldowns = {}  # maps username -> last_trigger_time
-block_trigger_cooldown_seconds = 100000
+block_trigger_cooldown_seconds = 180
 
 # =============================================================================
 # Utility Functions (get from WHIMC, send to Dispatcher)
