@@ -4486,7 +4486,7 @@ class Fetcher:
     '''
 
     def check_over_200_actions_in_2_minutes(self):
-        trigger_name = "check_over_120_actions_in_2_minutes" #edited live during camp July 31 - didn't want to rename
+        trigger_name = "check_over_40_actions_in_2_minutes" #edited live during camp July 31 - didn't want to rename
         enabled, priority, category = get_trigger_settings(trigger_name)
 
         # Filter to include only destroy (0) and place (1) actions
@@ -4498,14 +4498,14 @@ class Fetcher:
         if not action_counts.empty:
             print(f"\033[95m\nBUILD/DESTROY ACTION COUNTS:\033[0m\n{action_counts}\n")
 
-        # Trigger if actions exceed 120 within 2 minutes
+        # Trigger if actions exceed 40 within 2 minutes
         for user, count in action_counts.items():
             if not enabled:
                 print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
                 continue
 
-            if count > 120:
-                trigger_message = f"{user} has performed over 120 actions (place/destroy) in the last 2 minutes. Category: {category}"
+            if count > 40:
+                trigger_message = f"{user} has performed over 40 actions (place/destroy) in the last 2 minutes. Category: {category}"
                 self.triggers_list.append((trigger_message, user, priority))
                 print(trigger_message)
 
