@@ -4551,8 +4551,8 @@ class Fetcher:
                 print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
                 continue
 
-            if count > 100:
-                trigger_message = f"{user} has placed over 200 blocks in the last 2 minutes. Category: {category}"
+            if count > 120:
+                trigger_message = f"{user} has placed over 120 blocks in the last 2 minutes. Category: {category}"
                 self.triggers_list.append((trigger_message, user, priority))
                 print(trigger_message)
 
@@ -4598,8 +4598,8 @@ class Fetcher:
                 print(f"\033[90mSkipping {trigger_name} (priority {priority}) for {user} — disabled in Trigger Manager.\033[0m")
                 continue
 
-            if count > 100:
-                trigger_message = f"{user} has destroyed over 200 blocks in the last 2 minutes. Category: {category}"
+            if count > 120:
+                trigger_message = f"{user} has destroyed over 120 blocks in the last 2 minutes. Category: {category}"
                 self.triggers_list.append((trigger_message, user, priority))
                 print(trigger_message)
 
