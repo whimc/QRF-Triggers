@@ -1,0 +1,322 @@
+{
+    "check_in_pause_box": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Actions A7"
+    },
+    "check_block_triggers": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Block B3"
+    },
+    "check_movement_toward_npc_or_poi": {
+        "enabled": true,
+        "priority": 4,
+        "category": "Movement M6"
+    },
+    "check_possible_afk_behavior": {
+        "enabled": true,
+        "priority": 3,
+        "category": "Movement M5"
+    },
+    "check_prolonged_stop_in_region": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Movement/POI/Region M11"
+    },
+    "check_use_basic_science_tools": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Tools T5"
+    },
+    "check_avoiding_poi": {
+        "enabled": false,
+        "priority": 2,
+        "category": "Movement/POI M10"
+    },
+    "check_dominant_z_axis_movement": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Movement M12"
+    },
+    "check_movement_away_from_npc_or_poi": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Movement M7"
+    },
+    "check_appropriate_tool_use_near_poi": {
+        "enabled": true,
+        "priority": 3,
+        "category": "tools/poi"
+    },
+    "check_advanced_tool_use": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Tools T3"
+    },
+    "check_advanced_tool_use2": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Tools T4"
+    },
+    "check_question_like_observation": {
+        "enabled": true,
+        "priority": 3,
+        "category": "Observation O1"
+    },
+    "check_high_y_axis_movement": {
+        "enabled": false,
+        "priority": 2,
+        "category": "Movement M10"
+    },
+    "check_low_y_axis_movement": {
+        "enabled": false,
+        "priority": 2,
+        "category": "Movement M11"
+    },
+    "check_low_x_axis_movement": {
+        "enabled": false,
+        "priority": 2,
+        "category": "Movement M9"
+    },
+    "check_high_x_axis_movement": {
+        "enabled": false,
+        "priority": 2,
+        "category": "Movement M8"
+    },
+    "check_use_of_disabled_mc_commands": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Command C2"
+    },
+    "check_ignores_nearby_npc": {
+        "enabled": true,
+        "priority": 2,
+        "category": "NPC A20"
+    },
+    "check_visits_to_unowned_region": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Movement M2"
+    },
+    "check_breaks_own_block": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Block B2"
+    },
+    "check_airclick_burst": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Actions A3"
+    },
+    "check_high_chat_volume": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Observation O2"
+    },
+    "check_tool_inspiration_specific": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Social/Tool S2"
+    },
+    "check_tool_inspiration_generic": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Social/Tool S1"
+    },
+    "check_multiple_npc_visits": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Movement/NPC M16"
+    },
+    "check_world_exploration": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Movement M1"
+    },
+    "check_visit_unmarked_pois": {
+        "enabled": false,
+        "priority": 1,
+        "category": "Movement/POI M17"
+    },
+    "check_used_help_command": {
+        "enabled": false,
+        "priority": 1,
+        "category": "Command C1"
+    },
+    "check_block_breaks_by_others": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Block B1"
+    },
+    "achieves_death": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Actions A2"
+    },
+    "check_no_observations_last_20_minutes": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Observation-Based Trigger"
+    },
+    "check_last_tool_use_over_20_minutes": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Tool Usage Trigger"
+    },
+    "check_3_chat_entries_in_1_minute": {
+        "enabled": true,
+        "priority": 4,
+        "category": "Chat Behavior Trigger"
+    },
+    "check_3_observations_in_2_minutes": {
+        "enabled": true,
+        "priority": 3,
+        "category": "Observation-Based Trigger"
+    },
+    "check_3_tools_in_1_minute": {
+        "enabled": true,
+        "priority": 7,
+        "category": "Tool Usage Trigger"
+    },
+    "check_racing_non_stopping": {
+        "enabled": true,
+        "priority": 6,
+        "category": "Movement-Based Trigger"
+    },
+    "check_long_pair_close": {
+        "enabled": true,
+        "priority": 5,
+        "category": "Movement-Based Trigger"
+    },
+    "check_long_far_from_crowd": {
+        "enabled": false,
+        "priority": 4,
+        "category": "Movement-Based Trigger"
+    },
+    "check_prolonged_interaction_npc": {
+        "enabled": true,
+        "priority": 3,
+        "category": "Interaction Trigger"
+    },
+    "check_prolonged_stay_poi": {
+        "enabled": true,
+        "priority": 3,
+        "category": "Interaction Trigger"
+    },
+    "check_teleporting_to_multiple_players": {
+        "enabled": false,
+        "priority": 4,
+        "category": "Teleportation & Command Trigger"
+    },
+    "check_specific_commands": {
+        "enabled": false,
+        "priority": 3,
+        "category": "Teleportation & Command Trigger"
+    },
+    "check_five_or_more_observations_in_world": {
+        "enabled": false,
+        "priority": 8,
+        "category": "Observation-Based Trigger"
+    },
+    "check_five_or_more_tools_in_world": {
+        "enabled": false,
+        "priority": 8,
+        "category": "Tool Usage Trigger"
+    },
+    "check_five_chat_messages_in_world": {
+        "enabled": true,
+        "priority": 8,
+        "category": "Chat Behavior Trigger"
+    },
+    "check_tool_use_counts": {
+        "enabled": false,
+        "priority": 4,
+        "category": "Tool Usage Trigger"
+    },
+    "check_over_200_actions_in_2_minutes": {
+        "enabled": false,
+        "priority": 1,
+        "category": "Block Interaction Trigger"
+    },
+    "check_over_200_placed_actions_in_2_minutes": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Block Interaction Trigger"
+    },
+    "check_over_200_destroyed_actions_in_2_minutes": {
+        "enabled": false,
+        "priority": 1,
+        "category": "Block Interaction Trigger"
+    },
+    "block_grass_placed": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Block Interaction Trigger"
+    },
+    "block_stone_destroyed": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Block Interaction Trigger"
+    },
+    "no_tool_use_by_third_world": {
+        "enabled": false,
+        "priority": 2,
+        "category": "Tool Usage Trigger"
+    },
+    "no_observations_by_third_world": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Observation-Based Trigger"
+    },
+    "high_observation_count": {
+        "enabled": false,
+        "priority": 7,
+        "category": "Observation-Based Trigger"
+    },
+    "reached_5_observations_in_world": {
+        "enabled": false,
+        "priority": 7,
+        "category": "Observation-Based Trigger"
+    },
+    "check_mynoa_observations": {
+        "enabled": true,
+        "priority": 1,
+        "category": "Observation-Based Trigger"
+    },
+    "check_high_tool_use": {
+        "enabled": true,
+        "priority": 7,
+        "category": "Tool Usage Trigger"
+    },
+    "check_combined_multi_use_tools": {
+        "enabled": true,
+        "priority": 4,
+        "category": "Tool Usage Trigger"
+    },
+    "check_single_use_tools": {
+        "enabled": true,
+        "priority": 7,
+        "category": "Tool Usage Trigger"
+    },
+    "check_random_checkin": {
+        "enabled": true,
+        "priority": 10,
+        "category": "Randomized Trigger"
+    },
+    "check_nearby_similar_observation": {
+        "enabled": true,
+        "priority": 5,
+        "category": "Observation-Based Triggers"
+    },
+    "observation_near_poi": {
+        "enabled": true,
+        "priority": 5,
+        "category": "Observation-Based Triggers"
+    },
+    "tool_use_near_expected_action": {
+        "enabled": true,
+        "priority": 6,
+        "category": "Tool Usage Triggers"
+    }
+}
