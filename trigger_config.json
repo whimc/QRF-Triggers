@@ -249,16 +249,6 @@
         "priority": 1,
         "category": "Block Interaction Trigger"
     },
-    "block_grass_placed": {
-        "enabled": true,
-        "priority": 2,
-        "category": "Block Interaction Trigger"
-    },
-    "block_stone_destroyed": {
-        "enabled": true,
-        "priority": 2,
-        "category": "Block Interaction Trigger"
-    },
     "no_tool_use_by_third_world": {
         "enabled": false,
         "priority": 2,
@@ -318,5 +308,15 @@
         "enabled": true,
         "priority": 6,
         "category": "Tool Usage Triggers"
+    },
+    "observation_in_build_world": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Observation-Based Trigger"
+    },
+    "tool_use_in_build_world": {
+        "enabled": true,
+        "priority": 2,
+        "category": "Tool Usage Trigger"
     }
 }
